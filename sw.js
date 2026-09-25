@@ -1,5 +1,5 @@
 // Service worker: guarda os arquivos do app para funcionar sem internet.
-const CACHE = 'ficha-anestesia-v1';
+const CACHE = 'ficha-anestesia-v2';
 const ARQUIVOS = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/model.js', 'js/store.js', 'js/pdf.js',

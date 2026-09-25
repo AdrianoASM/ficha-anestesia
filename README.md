@@ -1,5 +1,7 @@
 # Ficha de Anestesia (PWA)
 
+## 👉 Abrir o app: https://adrianoasm.github.io/ficha-anestesia/
+
 App web instalável para preencher a ficha de anestesia do CEA no tablet ou celular e gerar o PDF no layout da ficha em papel.
 
 - Funciona offline depois do primeiro acesso.

@@ -149,6 +149,44 @@ async function render() {
 
 function topbar(html) { $('#topbar').innerHTML = html; }
 
+// ---------------------------------------------------------------- instalação
+let promptInstalar = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  promptInstalar = e;
+  const b = $('#instalar');
+  if (b) b.outerHTML = blocoInstalar();
+  ligarInstalar();
+});
+window.addEventListener('appinstalled', () => { promptInstalar = null; $('#instalar')?.remove(); toast('App instalado'); });
+
+const instalado = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const ehIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+function blocoInstalar() {
+  if (instalado()) return '';
+  if (promptInstalar) {
+    return `<div id="instalar" class="note"><b>Instale o app no aparelho</b> para usar em tela cheia e sem internet.
+      <p style="margin:8px 0 0"><button class="btn pri" id="binstalar">📲 Instalar app</button></p></div>`;
+  }
+  if (ehIOS()) {
+    return `<div id="instalar" class="note"><b>Para instalar no iPhone/iPad:</b> toque em Compartilhar
+      (quadrado com seta ↑) e depois em <b>Adicionar à Tela de Início</b>.</div>`;
+  }
+  return `<div id="instalar" class="note small">Para instalar: no Chrome, toque no menu <b>⋮</b> → <b>Instalar app</b>
+    (ou “Adicionar à tela inicial”).</div>`;
+}
+
+function ligarInstalar() {
+  $('#binstalar')?.addEventListener('click', async () => {
+    if (!promptInstalar) return;
+    promptInstalar.prompt();
+    await promptInstalar.userChoice.catch(() => {});
+    promptInstalar = null;
+    $('#instalar')?.remove();
+  });
+}
+
 // ---------------------------------------------------------------- login
 async function telaLogin() {
   const users = await store.listarUsuarios();
@@ -159,6 +197,7 @@ async function telaLogin() {
   app.innerHTML = `<div class="login card">
     <img class="logo" src="icons/logo.png" alt="CEA">
     <h1>Entrar</h1>
+    ${blocoInstalar()}
     <div class="userpick">${users.map((u) => `<button type="button" data-id="${u.id}">${esc(nomeUser(u))}</button>`).join('')}</div>
     <form id="fl">
       <label class="f">Senha<input type="password" name="senha" required autocomplete="current-password"></label>
@@ -180,6 +219,7 @@ async function telaLogin() {
       await entrar();
     } catch (err) { toast(err.message); }
   };
+  ligarInstalar();
   $('#bnovo').onclick = () => telaCadastro(false);
   $('#besq').onclick = () => esqueciSenha(users, sel);
   $('#brest').onclick = () => restaurarBackup();
@@ -189,6 +229,7 @@ function telaCadastro(primeiro) {
   $('#app').innerHTML = `<div class="login card">
     <img class="logo" src="icons/logo.png" alt="CEA">
     <h1>${primeiro ? 'Primeiro acesso' : 'Novo usuário'}</h1>
+    ${blocoInstalar()}
     <p class="note">Cada anestesista tem sua senha. Só quem criou a ficha consegue abri-la e editá-la.</p>
     <form id="fc" class="grid">
       <label class="f full">Nome completo<input type="text" name="nome" required autocomplete="name"></label>
@@ -214,6 +255,7 @@ function telaCadastro(primeiro) {
     });
     await entrar();
   };
+  ligarInstalar();
   $('#brest')?.addEventListener('click', () => restaurarBackup());
   $('#bvolta')?.addEventListener('click', () => telaLogin());
 }
@@ -248,7 +290,7 @@ function telaLista() {
   const q = S.filtro.toLowerCase();
   const lista = S.fichas.filter((f) => !q || `${f.pac.nome} ${f.pac.convenio} ${f.pre.procedimento} ${f.pac.intervencoes.join(' ')}`.toLowerCase().includes(q));
   const rotulo = { rascunho: 'Em andamento', finalizada: 'Finalizada', revisao: 'Em revisão' };
-  $('#app').innerHTML = `
+  $('#app').innerHTML = `${blocoInstalar()}
     <div class="toolbar">
       <input type="search" id="busca" placeholder="Buscar paciente, procedimento…" value="${esc(S.filtro)}">
       <button class="btn pri big" id="bnova">＋ Nova ficha</button>
@@ -260,6 +302,7 @@ function telaLista() {
           <span class="badge ${f.status}">${rotulo[f.status]}</span></button>`).join('')
         || `<div class="card muted">${S.fichas.length ? 'Nenhuma ficha encontrada.' : 'Nenhuma ficha ainda. Toque em “Nova ficha” para começar.'}</div>`}
     </div>`;
+  ligarInstalar();
   $('#busca').oninput = (e) => { S.filtro = e.target.value; const p = e.target.selectionStart; telaLista(); const b = $('#busca'); b.focus(); b.setSelectionRange(p, p); };
   $('#bnova').onclick = async () => {
     const f = novaFicha(store.usuarioAtual());
