@@ -228,14 +228,14 @@ export function normalizarFicha(f) {
 
 export const temTecnica = (f) => {
   const a = f.anest;
-  return !!(a.geral || a.geralIV || a.geralInal || a.geralBal || a.sedacao || a.local || a.locoregional
+  return !!(a.na || a.geral || a.geralIV || a.geralInal || a.geralBal || a.sedacao || a.local || a.locoregional
     || a.peridural || a.cateter || a.subaracnoidea || a.bloqueio || a.estimulador);
 };
 export const temVentilacao = (f) => {
   const v = f.vent;
-  return !!(v.espontanea || v.vcm || v.vcv || v.pcv || v.mascFacial || v.mascLaringea || v.intubacao);
+  return !!(v.na || v.espontanea || v.vcm || v.vcv || v.pcv || v.mascFacial || v.mascLaringea || v.intubacao);
 };
-export const temAcesso = (f) => !!(String(f.acesso.perifNum).trim() || String(f.acesso.centralVia).trim());
+export const temAcesso = (f) => !!(f.acesso.na || String(f.acesso.perifNum).trim() || String(f.acesso.centralVia).trim());
 
 // Itens sem os quais a ficha não pode ser finalizada.
 export function obrigatoriosFaltando(f) {

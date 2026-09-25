@@ -103,6 +103,8 @@ input:disabled, select:disabled, textarea:disabled { opacity: .75; }
 }
 .chk input { width: 22px; height: 22px; accent-color: var(--pri); flex: none; }
 .chk:has(input:checked) { background: var(--pri-soft); border-color: var(--pri); }
+.chk.na { margin-bottom: 10px; border-style: dashed; font-weight: 600; }
+.chk.na:has(input:checked) { background: var(--warn-soft); border-color: var(--warn); }
 .checks { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
 
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }

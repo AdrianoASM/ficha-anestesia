@@ -206,7 +206,8 @@ function pagina1(P, f, logo, favoritos) {
 
   // Acesso venoso (lateral da seção de agentes)
   const ac = f.acesso;
-  P.campo('Periférico nº', ac.perifNum, 179, 82, 198, { size: 6 });
+  if (ac.na) P.v('Não se aplica', 188.3, 79.6, { size: 5.8, italic: true, bold: true, align: 'center' });
+  P.campo('Periférico nº', ac.perifNum, 179, 83, 198, { size: 6 });
   P.campo('Local', ac.local, 179, 87.5, 198, { size: 6 });
   P.campo('Central Via', ac.centralVia, 179, 93, 198, { size: 6 });
   P.t('Intercorrências', 179, 98, { size: 6 });
@@ -394,15 +395,16 @@ function painelDireito(P, f) {
   const an = f.anest, ve = f.vent;
   P.rect(x, 116.6, w, 144.4, { fill: [238, 238, 238] });
   let y = 116.6;
-  const cab = (t) => {
+  const cab = (t, na) => {
     P.rect(x, y, w, 4.2, { fill: [205, 205, 205], lw: 0.2 });
-    P.t(t, x + w / 2, y + 3.1, { size: 6.5, bold: true, align: 'center' });
+    P.t(t, na ? x + 1.2 : x + w / 2, y + 3.1, { size: 6.5, bold: true, align: na ? 'left' : 'center' });
+    if (na) P.v('Não se aplica', x + w - 1, y + 3.1, { size: 5.5, italic: true, bold: true, align: 'right' });
     y += 4.2 + 3.6;
   };
   const nl = (d = 3.55) => { y += d; };
   const xa = x + 1.2;
 
-  cab('ANESTESIA');
+  cab('ANESTESIA', an.na);
   P.t('GERAL', xa, y, { size: 5.8, bold: an.geral });
   P.circ(xa + 8, y, an.geralIV, 'IV', { size: 5.5 });
   P.circ(xa + 15, y, an.geralInal, 'Inal.', { size: 5.5 });
@@ -428,7 +430,7 @@ function painelDireito(P, f) {
   P.line(xa, y + 0.5, xr - 1, y + 0.5, 0.12); P.v(an.intercDesc, xa + 0.3, y, { size: 5.5, maxW: w - 3 });
   y += 2.2;
 
-  cab('VENTILAÇÃO');
+  cab('VENTILAÇÃO', ve.na);
   P.circ(xa, y, ve.espontanea, 'Ventilação Espontânea', { size: 5.3 });
   P.circ(xa + 23.5, y, ve.vcm, 'VCM', { size: 5.3 }); nl();
   P.circ(xa, y, ve.vcv, 'VCV', { size: 5.5 });

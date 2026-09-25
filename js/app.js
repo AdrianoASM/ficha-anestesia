@@ -384,6 +384,7 @@ function mudou(path) {
 
 // helpers de formulário
 const inp = (path, label, o = {}) => `<label class="f ${o.cls || ''}">${label}<input type="${o.type || 'text'}" data-f="${path}" ${o.im ? `inputmode="${o.im}"` : ''} ${o.ph ? `placeholder="${esc(o.ph)}"` : ''} ${o.list ? `list="${o.list}"` : ''} autocomplete="off"></label>`;
+const naoSeAplica = (path) => `<label class="chk na"><input type="checkbox" data-f="${path}">Não se aplica</label>`;
 const chk = (path, label) => `<label class="chk"><input type="checkbox" data-f="${path}">${label}</label>`;
 const chips = (path, opts) => `<div class="chips" data-f="${path}">${opts.map((o) => { const [v, l] = Array.isArray(o) ? o : [o, o]; return `<button data-v="${esc(v)}">${esc(l)}</button>`; }).join('')}</div>`;
 const linha = (label, html) => `<div class="row-l"><span class="lbl">${label}</span>${html}</div>`;
@@ -445,7 +446,7 @@ function abaPre() {
 // Cartões de anestesia, ventilação e acesso venoso (obrigatórios para finalizar).
 function cardsObrigatorios() {
   return ''
-  + card('Tipo de anestesia *', `<div class="checks">
+  + card('Tipo de anestesia *', `${naoSeAplica('anest.na')}<div class="checks">
       ${chk('anest.geral', '<b>Geral</b>')}${chk('anest.geralIV', 'Geral IV')}${chk('anest.geralInal', 'Geral inalatória')}${chk('anest.geralBal', 'Geral balanceada')}
       ${chk('anest.sedacao', '<b>Sedação</b>')}${chk('anest.local', 'Local')}${chk('anest.locoregional', 'Locorregional')}
       ${chk('anest.peridural', 'Peridural')}${chk('anest.cateter', 'Peridural c/ cateter')}${chk('anest.subaracnoidea', 'Subaracnóidea')}
@@ -456,7 +457,7 @@ function cardsObrigatorios() {
       ${inp('anest.localBloq', 'Local do bloqueio', { cls: 'span2' })}</div>
       ${linha('Intercorrências', chips('anest.interc', SN))}
       <div class="grid g2">${inp('anest.intercDesc', 'Descrição da intercorrência')}</div>`)
-  + card('Ventilação / via aérea *', `<div class="checks">
+  + card('Ventilação / via aérea *', `${naoSeAplica('vent.na')}<div class="checks">
       ${chk('vent.espontanea', 'Ventilação espontânea')}${chk('vent.vcm', 'VCM')}${chk('vent.vcv', 'VCV')}${chk('vent.pcv', 'PCV')}
       ${chk('vent.mascFacial', 'Máscara facial')}${chk('vent.mascLaringea', 'Máscara laríngea')}</div>
       <div class="grid" style="margin-top:10px">${inp('vent.mlNum', 'Máscara laríngea nº', { im: 'decimal' })}${inp('vent.tuboNum', 'Tubo nº', { im: 'decimal' })}</div>
@@ -464,7 +465,7 @@ function cardsObrigatorios() {
       ${linha('Dificuldade', chips('vent.dificuldade', ['Fácil', 'Difícil']))}
       ${linha('Intercorrências', chips('vent.interc', SN))}
       <div class="grid g2">${inp('vent.intercDesc', 'Descrição da intercorrência')}</div>`)
-  + card('Acesso venoso / MPA *', `<div class="grid">
+  + card('Acesso venoso / MPA *', `${naoSeAplica('acesso.na')}<div class="grid">
       ${inp('acesso.perifNum', 'Periférico nº', { ph: 'ex.: 18G' })}${inp('acesso.local', 'Local', { ph: 'ex.: MSE' })}
       ${inp('acesso.centralVia', 'Central — via')}${inp('acesso.mpa', 'MPA')}</div>
       ${linha('Intercorrências', chips('acesso.interc', SN))}`);
