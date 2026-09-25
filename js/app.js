@@ -10,6 +10,9 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+const APP_VERSAO = '1.0';
+const DESENVOLVEDOR = 'Adriano A S Mendonça';
+
 // Rodando dentro do APK Android (Capacitor)?
 const NATIVO = !!window.Capacitor?.isNativePlatform?.();
 const Arquivos = NATIVO ? window.Capacitor.registerPlugin('Arquivos') : null;
@@ -1053,7 +1056,11 @@ function telaConfig() {
         <span><button data-fe="${i}" aria-label="Editar">✏️</button><button data-fd="${i}" aria-label="Remover">🗑️</button></span></div>`).join('')}</div>
       <div class="btns" style="margin-top:10px"><button class="btn" id="bfadd">＋ Adicionar</button><button class="btn" id="bfreset">Restaurar lista padrão</button></div>`)
     + card('Sessão', `<button class="btn bad" id="bsair">Sair</button>`)
-    + `<p class="small muted" style="text-align:center">Ficha de Anestesia · ${NATIVO ? 'app Android' : 'versão web'} · fichas guardadas criptografadas neste aparelho</p>`;
+    + card('Sobre', `<div style="display:flex;gap:14px;align-items:center">
+        <img src="icons/logo.png" alt="" width="64" height="64" style="border-radius:12px;background:#fff">
+        <div><b>Ficha de Anestesia</b> — versão ${APP_VERSAO} (${NATIVO ? 'app Android' : 'versão web'})<br>
+        Desenvolvido por <b>${DESENVOLVEDOR}</b><br>
+        <span class="small muted">CEA — Excelência em Anestesia · fichas guardadas criptografadas neste aparelho</span></div></div>`);
 
   $('#fperfil').onsubmit = async (e) => {
     e.preventDefault();
