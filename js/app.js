@@ -10,6 +10,10 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// Rodando dentro do APK Android (Capacitor)?
+const NATIVO = !!window.Capacitor?.isNativePlatform?.();
+const Arquivos = NATIVO ? window.Capacitor.registerPlugin('Arquivos') : null;
+
 const S = { fichas: [], f: null, aba: 'pac', logo: null, timer: null, wake: null, filtro: '' };
 
 const ABAS = [
@@ -164,7 +168,7 @@ const instalado = () => matchMedia('(display-mode: standalone)').matches || navi
 const ehIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 function blocoInstalar() {
-  if (instalado()) return '';
+  if (NATIVO || instalado()) return '';
   if (promptInstalar) {
     return `<div id="instalar" class="note"><b>Instale o app no aparelho</b> para usar em tela cheia e sem internet.
       <p style="margin:8px 0 0"><button class="btn pri" id="binstalar">📲 Instalar app</button></p></div>`;
@@ -223,6 +227,7 @@ async function telaLogin() {
   $('#bnovo').onclick = () => telaCadastro(false);
   $('#besq').onclick = () => esqueciSenha(users, sel);
   $('#brest').onclick = () => restaurarBackup();
+  if (NATIVO) ligarArmazenamento();
 }
 
 function telaCadastro(primeiro) {
@@ -290,7 +295,8 @@ function telaLista() {
   const q = S.filtro.toLowerCase();
   const lista = S.fichas.filter((f) => !q || `${f.pac.nome} ${f.pac.convenio} ${f.pre.procedimento} ${f.pac.intervencoes.join(' ')}`.toLowerCase().includes(q));
   const rotulo = { rascunho: 'Em andamento', finalizada: 'Finalizada', revisao: 'Em revisão' };
-  $('#app').innerHTML = `${blocoInstalar()}
+  const semPasta = NATIVO && !armazenamento().uri && !armazenamento().modo;
+  $('#app').innerHTML = `${blocoInstalar()}${semPasta ? `<div class="note warn">📁 Escolha onde salvar os PDFs das fichas (celular ou nuvem). <button class="btn" id="birpasta" style="margin-top:6px">Configurar agora</button></div>` : ''}
     <div class="toolbar">
       <input type="search" id="busca" placeholder="Buscar paciente, procedimento…" value="${esc(S.filtro)}">
       <button class="btn pri big" id="bnova">＋ Nova ficha</button>
@@ -303,6 +309,7 @@ function telaLista() {
         || `<div class="card muted">${S.fichas.length ? 'Nenhuma ficha encontrada.' : 'Nenhuma ficha ainda. Toque em “Nova ficha” para começar.'}</div>`}
     </div>`;
   ligarInstalar();
+  $('#birpasta')?.addEventListener('click', () => go('#/config'));
   $('#busca').oninput = (e) => { S.filtro = e.target.value; const p = e.target.selectionStart; telaLista(); const b = $('#busca'); b.focus(); b.setSelectionRange(p, p); };
   $('#bnova').onclick = async () => {
     const f = novaFicha(store.usuarioAtual());
@@ -782,7 +789,12 @@ function abaFim() {
   const f = S.f;
   const pend = pendencias(f);
   const obrig = obrigatoriosFaltando(f);
-  const acoesPdf = `<div class="btns">
+  const acoesPdf = NATIVO ? `<div class="btns">
+      <button class="btn pri" id="bbaixar">💾 Salvar PDF</button>
+      <button class="btn" id="bver">📄 Abrir</button>
+      <button class="btn" id="bimp">🖨️ Imprimir</button>
+      <button class="btn" id="bshare">📤 Compartilhar</button></div>
+      <p class="small muted">${descricaoDestino()}</p>` : `<div class="btns">
       <button class="btn pri" id="bver">📄 Ver / imprimir PDF</button>
       <button class="btn" id="bshare">📤 Compartilhar</button>
       <button class="btn" id="bbaixar">💾 Salvar no aparelho</button></div>`;
@@ -818,6 +830,7 @@ function ligarFim() {
   $('#bver')?.addEventListener('click', () => acaoPdf('ver'));
   $('#bshare')?.addEventListener('click', () => acaoPdf('share'));
   $('#bbaixar')?.addEventListener('click', () => acaoPdf('baixar'));
+  $('#bimp')?.addEventListener('click', () => acaoPdf('imprimir'));
   $('#bobrig')?.addEventListener('click', async () => { await dlgObrigatorios(); telaFicha(); });
   $('#bfin')?.addEventListener('click', async () => {
     if (obrigatoriosFaltando(f).length && !(await dlgObrigatorios())) return telaFicha();
@@ -829,7 +842,8 @@ function ligarFim() {
     await salvarAgora();
     telaFicha();
     toast('Ficha finalizada');
-    acaoPdf('baixar');
+    await acaoPdf('baixar');
+    if (NATIVO) backupAutomatico();
   });
   $('#bdel')?.addEventListener('click', async () => {
     if (!(await confirmar('Excluir rascunho', 'Excluir definitivamente esta ficha em andamento?', 'Excluir', 'bad'))) return;
@@ -941,12 +955,68 @@ async function compartilhar(blob, nome, tipo) {
   return false;
 }
 
+// ----- arquivos no APK: pasta escolhida pelo usuário (aparelho, cartão, Drive, OneDrive…)
+const armazenamento = () => store.usuarioAtual()?.armazenamento || {};
+
+function descricaoDestino() {
+  const a = armazenamento();
+  if (a.modo === 'pasta' && a.uri) return `Os PDFs são salvos automaticamente em: <b>${esc(a.provedor ? a.provedor + ' › ' : '')}${esc(a.nome)}/Fichas</b>.`;
+  return 'Ao salvar, o Android pergunta onde guardar (aparelho, Google Drive, OneDrive…). Configure uma pasta fixa em ⚙️ Configurações.';
+}
+
+function blobBase64(blob) {
+  return new Promise((ok, erro) => {
+    const fr = new FileReader();
+    fr.onload = () => ok(String(fr.result).split(',')[1]);
+    fr.onerror = () => erro(fr.error);
+    fr.readAsDataURL(blob);
+  });
+}
+
+// Salva no destino configurado; se não houver pasta (ou ela ficou inacessível), abre "Salvar em".
+async function salvarNativo(blob, nome, mime, subpasta, { silencioso = false } = {}) {
+  const a = armazenamento();
+  const base64 = await blobBase64(blob);
+  if (a.modo === 'pasta' && a.uri) {
+    try {
+      await Arquivos.salvarNaPasta({ pasta: a.uri, subpasta, nome, mime, base64 });
+      if (!silencioso) toast(`Salvo em ${a.nome}/${subpasta}: ${nome}`, 3500);
+      return true;
+    } catch (e) {
+      if (silencioso) { toast('Backup automático falhou: ' + e.message, 5000); return false; }
+      toast(e.message + ' Escolha onde salvar agora.', 5000);
+    }
+  }
+  if (silencioso) return false;
+  const r = await Arquivos.salvarComo({ nome, mime, base64 });
+  if (r.cancelado) { toast('Arquivo não salvo'); return false; }
+  toast(`Salvo${r.provedor ? ' em ' + r.provedor : ''}: ${nome}`, 3500);
+  return true;
+}
+
+async function backupAutomatico() {
+  const a = armazenamento();
+  if (!(a.modo === 'pasta' && a.uri && a.backupAuto)) return;
+  const u = store.usuarioAtual();
+  const blob = new Blob([JSON.stringify(await store.gerarBackup())], { type: 'application/json' });
+  if (await salvarNativo(blob, `backup-ficha-anestesia-${new Date().toISOString().slice(0, 10)}.json`, 'application/json', 'Backups', { silencioso: true })) {
+    u.ultimoBackup = new Date().toISOString();
+    await store.salvarUsuario();
+  }
+}
+
 async function acaoPdf(modo) {
   await salvarAgora();
   toast('Gerando PDF…', 1500);
   try {
     const blob = await gerarPDF(S.f, { favoritos: favoritos(), logo: await carregarLogo() });
     const nome = nomeArquivo(S.f);
+    if (NATIVO) {
+      if (modo === 'baixar') return salvarNativo(blob, nome, 'application/pdf', 'Fichas');
+      const base64 = await blobBase64(blob);
+      const fn = { ver: 'abrir', share: 'compartilhar', imprimir: 'imprimir' }[modo];
+      return Arquivos[fn]({ nome, mime: 'application/pdf', base64 });
+    }
     if (modo === 'share') return compartilhar(blob, nome, 'application/pdf');
     if (modo === 'baixar') { baixar(blob, nome); return toast(`Salvo: ${nome}`); }
     const url = URL.createObjectURL(blob);
@@ -971,10 +1041,11 @@ function telaConfig() {
       <label class="f">UF<input type="text" name="uf" value="${esc(u.uf)}" maxlength="2" required></label>
       <div class="full"><button class="btn pri">Salvar dados</button></div></form>
       <p class="small muted">Vale para as próximas fichas. As já criadas mantêm o nome e CRM de quando foram feitas.</p>`)
+    + (NATIVO ? cardArmazenamento() : '')
     + card('Senha', `<div class="btns"><button class="btn" id="bsenha">Trocar senha</button></div>`)
     + card('Backup', `<p class="small">O backup contém suas fichas <b>criptografadas</b>: só abre com a sua senha ou o código de recuperação.
         No Android, “Compartilhar backup” permite enviar direto para o <b>Google Drive</b> ou <b>OneDrive</b>.</p>
-      <div class="btns"><button class="btn pri" id="bbk">📤 Compartilhar backup</button><button class="btn" id="bbkd">💾 Baixar backup</button>
+      <div class="btns"><button class="btn pri" id="bbk">📤 Compartilhar backup</button><button class="btn" id="bbkd">💾 ${NATIVO ? 'Salvar' : 'Baixar'} backup</button>
       <button class="btn" id="brest">📥 Restaurar backup</button></div>
       <p class="small muted">Último backup: ${u.ultimoBackup ? dataHoraBR(u.ultimoBackup) : 'nunca'}</p>`)
     + card('Drogas favoritas', `<p class="small muted">Aparecem como atalho ao registrar drogas. “Ampola” é o conteúdo de 1 ampola na mesma unidade (usado para calcular a coluna Amp. do PDF).</p>
@@ -982,7 +1053,7 @@ function telaConfig() {
         <span><button data-fe="${i}" aria-label="Editar">✏️</button><button data-fd="${i}" aria-label="Remover">🗑️</button></span></div>`).join('')}</div>
       <div class="btns" style="margin-top:10px"><button class="btn" id="bfadd">＋ Adicionar</button><button class="btn" id="bfreset">Restaurar lista padrão</button></div>`)
     + card('Sessão', `<button class="btn bad" id="bsair">Sair</button>`)
-    + `<p class="small muted" style="text-align:center">Ficha de Anestesia · protótipo PWA · dados salvos apenas neste aparelho</p>`;
+    + `<p class="small muted" style="text-align:center">Ficha de Anestesia · ${NATIVO ? 'app Android' : 'versão web'} · fichas guardadas criptografadas neste aparelho</p>`;
 
   $('#fperfil').onsubmit = async (e) => {
     e.preventDefault();
@@ -1007,7 +1078,10 @@ function telaConfig() {
     const data = await store.gerarBackup();
     const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
     const nome = `backup-ficha-anestesia-${new Date().toISOString().slice(0, 10)}.json`;
-    if (modo === 'share') await compartilhar(blob, nome, 'application/json'); else baixar(blob, nome);
+    if (NATIVO) {
+      if (modo === 'share') await Arquivos.compartilhar({ nome, mime: 'application/json', base64: await blobBase64(blob) });
+      else if (!(await salvarNativo(blob, nome, 'application/json', 'Backups'))) return;
+    } else if (modo === 'share') await compartilhar(blob, nome, 'application/json'); else baixar(blob, nome);
     u.ultimoBackup = new Date().toISOString();
     await store.salvarUsuario();
     telaConfig();
@@ -1041,6 +1115,43 @@ function telaConfig() {
   $('#bsair').onclick = () => { store.sair(); S.fichas = []; go('#/'); };
 }
 
+function cardArmazenamento() {
+  const a = armazenamento();
+  const modo = a.modo === 'pasta' && a.uri ? 'pasta' : 'perguntar';
+  return card('Onde salvar os arquivos (PDFs e backups)', `
+    <div class="note">${a.uri
+      ? `Pasta escolhida: <b>${esc(a.provedor ? a.provedor + ' › ' : '')}${esc(a.nome)}</b><br><span class="small">PDFs em <b>Fichas/</b> e backups em <b>Backups/</b>.</span>`
+      : 'Nenhuma pasta escolhida ainda.'}</div>
+    <div class="btns"><button class="btn pri" id="bpasta">📁 ${a.uri ? 'Trocar pasta' : 'Escolher pasta'}</button></div>
+    <p class="small muted">No seletor do Android, toque em <b>☰</b> para ver: memória do aparelho, cartão SD, <b>Google Drive</b>, <b>OneDrive</b>
+      (se os apps estiverem instalados). Se a nuvem não aparecer ou não aceitar, use “Perguntar onde salvar”.</p>
+    <div class="chips" id="modoArm" style="margin:10px 0">
+      <button data-v="pasta" aria-pressed="${modo === 'pasta'}" ${a.uri ? '' : 'disabled'}>Salvar automaticamente na pasta</button>
+      <button data-v="perguntar" aria-pressed="${modo === 'perguntar'}">Perguntar onde salvar a cada arquivo</button>
+    </div>
+    <label class="chk"><input type="checkbox" id="bkauto" ${a.backupAuto ? 'checked' : ''} ${a.uri ? '' : 'disabled'}>
+      Fazer backup automático na pasta ao finalizar cada ficha</label>`);
+}
+
+function ligarArmazenamento() {
+  const u = store.usuarioAtual();
+  const salvar = async (mudancas) => {
+    u.armazenamento = { ...armazenamento(), ...mudancas };
+    await store.salvarUsuario();
+    telaConfig();
+  };
+  $('#bpasta').onclick = async () => {
+    try {
+      const r = await Arquivos.escolherPasta();
+      if (r.cancelado) return;
+      await salvar({ uri: r.uri, nome: r.nome, provedor: r.provedor, modo: 'pasta', backupAuto: armazenamento().backupAuto ?? true });
+      toast(`Pasta definida: ${r.provedor ? r.provedor + ' › ' : ''}${r.nome}`, 3500);
+    } catch (e) { toast(e.message, 6000); }
+  };
+  $$('#modoArm button').forEach((b) => (b.onclick = () => salvar({ modo: b.dataset.v })));
+  $('#bkauto').onchange = (e) => salvar({ backupAuto: e.target.checked });
+}
+
 function restaurarBackup() {
   const i = document.createElement('input');
   i.type = 'file';
@@ -1059,7 +1170,7 @@ function restaurarBackup() {
 // ---------------------------------------------------------------- início
 window.addEventListener('visibilitychange', () => { if (document.hidden) salvarAgora(); });
 window.addEventListener('pagehide', () => salvarAgora());
-if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+if (!NATIVO && 'serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 render();
