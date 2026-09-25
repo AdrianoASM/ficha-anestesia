@@ -1,5 +1,7 @@
 // Modelo de dados da ficha, catálogos e utilidades de tempo.
 
+export const N_MEDICAMENTOS = 12;
+
 export const VIAS = ['IV', 'IM', 'SC', 'IT', 'PD', 'VO', 'Inal', 'Tóp', 'Perineural'];
 export const UNIDADES = ['mg', 'mcg', 'g', 'ml', 'UI', '%', 'mEq'];
 
@@ -141,7 +143,7 @@ export function novaFicha(user) {
     anestesista: { nome: user.nome, crm: user.crm, uf: user.uf },
     pac: {
       nome: '', idade: '', data: hojeISO(), sexo: '', convenio: '', matricula: '', carater: '',
-      peso: '', jejum: '', cirurgiao: '', aux1: '', aux2: '', intervencoes: ['', '', '', '', ''],
+      peso: '', jejum: '', cirurgiao: '', cirurgiaoCrm: '', aux1: '', aux2: '', intervencoes: ['', '', '', '', ''],
     },
     tempos: { inicioAnest: null, inicioCir: null, fimCir: null, fimAnest: null },
     vitais: [], // {id, t, pas, pad, fc, spo2, etco2, temp, ritmo}
@@ -166,7 +168,7 @@ export function novaFicha(user) {
     pre: {
       diagnostico: '', procedimento: '', itens: {}, outros: {}, diabetesTipo: '', cigarros: '',
       cancerLocal: '', qt: false, rt: false, alergias: ['', '', ''], previas: ['', '', ''],
-      medicamentos: ['', '', ''], gravidez: '', dum: '', nvpo: '', histFamiliar: '',
+      medicamentos: Array(N_MEDICAMENTOS).fill(''), gravidez: '', dum: '', nvpo: '', histFamiliar: '',
       asa: '', emergencia: '', reservaSangue: '', mallampati: '', vad: '',
     },
     srpa: {
@@ -215,4 +217,31 @@ export function aldreteTotal(f, tempo) {
 
 export function num(v) {
   return String(v ?? '').replace('.', ',');
+}
+
+// Completa fichas criadas em versões anteriores do app com os campos novos.
+export function normalizarFicha(f) {
+  f.pac.cirurgiaoCrm ??= '';
+  while (f.pre.medicamentos.length < N_MEDICAMENTOS) f.pre.medicamentos.push('');
+  return f;
+}
+
+export const temTecnica = (f) => {
+  const a = f.anest;
+  return !!(a.geral || a.geralIV || a.geralInal || a.geralBal || a.sedacao || a.local || a.locoregional
+    || a.peridural || a.cateter || a.subaracnoidea || a.bloqueio || a.estimulador);
+};
+export const temVentilacao = (f) => {
+  const v = f.vent;
+  return !!(v.espontanea || v.vcm || v.vcv || v.pcv || v.mascFacial || v.mascLaringea || v.intubacao);
+};
+export const temAcesso = (f) => !!(String(f.acesso.perifNum).trim() || String(f.acesso.centralVia).trim());
+
+// Itens sem os quais a ficha não pode ser finalizada.
+export function obrigatoriosFaltando(f) {
+  const p = [];
+  if (!temTecnica(f)) p.push('Tipo de anestesia');
+  if (!temVentilacao(f)) p.push('Ventilação / via aérea');
+  if (!temAcesso(f)) p.push('Acesso venoso (periférico ou central)');
+  return p;
 }

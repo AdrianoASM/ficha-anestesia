@@ -2,7 +2,7 @@ import * as store from './store.js';
 import {
   VIAS, UNIDADES, DROGAS_PADRAO, FLUIDOS, EVENTOS_RAPIDOS, MONITORIZACAO, EQUIPAMENTOS,
   PRE_GRUPOS, ALDRETE, ALDRETE_TEMPOS, novaFicha, uid, hhmm, dataBR, dataHoraBR, horaParaISO,
-  calcBalanco, aldreteTotal, num, pad,
+  calcBalanco, aldreteTotal, num, pad, N_MEDICAMENTOS, normalizarFicha, obrigatoriosFaltando,
 } from './model.js';
 import { gerarPDF } from './pdf.js';
 
@@ -14,7 +14,7 @@ const S = { fichas: [], f: null, aba: 'pac', logo: null, timer: null, wake: null
 
 const ABAS = [
   ['pac', '👤', 'Paciente'], ['pre', '📋', 'Pré-anest.'], ['intra', '⏱️', 'Intraop.'],
-  ['tec', '🫁', 'Técnica'], ['srpa', '🛏️', 'SRPA'], ['fim', '✅', 'Finalizar'],
+  ['tec', '🫁', 'Anestesia'], ['srpa', '🛏️', 'SRPA'], ['fim', '✅', 'Finalizar'],
 ];
 
 // ---------------------------------------------------------------- utilidades
@@ -138,7 +138,7 @@ async function render() {
   if (rota === 'ficha' && id) {
     const f = S.fichas.find((x) => x.id === id);
     if (!f) return go('#/lista');
-    S.f = f;
+    S.f = normalizarFicha(f);
     S.aba = aba || S.aba || 'pac';
     return telaFicha();
   }
@@ -406,6 +406,7 @@ function abaPaciente() {
   + card('Equipe', `<div class="grid">
       <label class="f span2">Anestesiologista<input type="text" value="${esc(`${f.anestesista.nome} — CRM ${f.anestesista.crm}/${f.anestesista.uf}`)}" disabled></label>
       ${inp('pac.cirurgiao', 'Cirurgião', { cls: 'span2' })}
+      ${inp('pac.cirurgiaoCrm', 'CRM do cirurgião', { im: 'numeric' })}
       ${inp('pac.aux1', '1º Auxiliar')}
       ${inp('pac.aux2', '2º Auxiliar')}
     </div>`)
@@ -437,14 +438,14 @@ function abaPre() {
   + card('Gravidez', `${chips('pre.gravidez', ['Negativo', 'Positivo'])}<div class="grid" style="margin-top:8px">${inp('pre.dum', 'DUM', { type: 'date' })}</div>`)
   + card('Alergias', `<div class="grid g2">${[0, 1, 2].map((i) => inp(`pre.alergias.${i}`, `${i + 1}.`)).join('')}</div>`)
   + card('Cirurgia / anestesia prévia', `<div class="grid g2">${[0, 1, 2].map((i) => inp(`pre.previas.${i}`, `${i + 1}.`)).join('')}</div>`)
-  + card('Uso de medicamentos', `<div class="grid g2">${[0, 1, 2].map((i) => inp(`pre.medicamentos.${i}`, `${i + 1}.`)).join('')}</div>`)
+  + card('Uso de medicamentos', `<div class="grid g2">${[...Array(N_MEDICAMENTOS).keys()].map((i) => inp(`pre.medicamentos.${i}`, `${i + 1}.`)).join('')}</div>`)
   + `</div></div>`;
 }
 
-function abaTecnica() {
-  const calc = calcBalanco(S.f);
-  return `<div class="cols2"><div>`
-  + card('Anestesia', `<div class="checks">
+// Cartões de anestesia, ventilação e acesso venoso (obrigatórios para finalizar).
+function cardsObrigatorios() {
+  return ''
+  + card('Tipo de anestesia *', `<div class="checks">
       ${chk('anest.geral', '<b>Geral</b>')}${chk('anest.geralIV', 'Geral IV')}${chk('anest.geralInal', 'Geral inalatória')}${chk('anest.geralBal', 'Geral balanceada')}
       ${chk('anest.sedacao', '<b>Sedação</b>')}${chk('anest.local', 'Local')}${chk('anest.locoregional', 'Locorregional')}
       ${chk('anest.peridural', 'Peridural')}${chk('anest.cateter', 'Peridural c/ cateter')}${chk('anest.subaracnoidea', 'Subaracnóidea')}
@@ -455,7 +456,7 @@ function abaTecnica() {
       ${inp('anest.localBloq', 'Local do bloqueio', { cls: 'span2' })}</div>
       ${linha('Intercorrências', chips('anest.interc', SN))}
       <div class="grid g2">${inp('anest.intercDesc', 'Descrição da intercorrência')}</div>`)
-  + card('Ventilação / via aérea', `<div class="checks">
+  + card('Ventilação / via aérea *', `<div class="checks">
       ${chk('vent.espontanea', 'Ventilação espontânea')}${chk('vent.vcm', 'VCM')}${chk('vent.vcv', 'VCV')}${chk('vent.pcv', 'PCV')}
       ${chk('vent.mascFacial', 'Máscara facial')}${chk('vent.mascLaringea', 'Máscara laríngea')}</div>
       <div class="grid" style="margin-top:10px">${inp('vent.mlNum', 'Máscara laríngea nº', { im: 'decimal' })}${inp('vent.tuboNum', 'Tubo nº', { im: 'decimal' })}</div>
@@ -463,10 +464,16 @@ function abaTecnica() {
       ${linha('Dificuldade', chips('vent.dificuldade', ['Fácil', 'Difícil']))}
       ${linha('Intercorrências', chips('vent.interc', SN))}
       <div class="grid g2">${inp('vent.intercDesc', 'Descrição da intercorrência')}</div>`)
-  + card('Acesso venoso / MPA', `<div class="grid">
+  + card('Acesso venoso / MPA *', `<div class="grid">
       ${inp('acesso.perifNum', 'Periférico nº', { ph: 'ex.: 18G' })}${inp('acesso.local', 'Local', { ph: 'ex.: MSE' })}
       ${inp('acesso.centralVia', 'Central — via')}${inp('acesso.mpa', 'MPA')}</div>
-      ${linha('Intercorrências', chips('acesso.interc', SN))}`)
+      ${linha('Intercorrências', chips('acesso.interc', SN))}`);
+}
+
+function abaTecnica() {
+  const calc = calcBalanco(S.f);
+  return `<div class="cols2"><div>`
+  + cardsObrigatorios()
   + `</div><div>`
   + card('Monitorização', `<div class="checks">${MONITORIZACAO.map(([k, l]) => chk(`monit.${k}`, l)).join('')}</div>`)
   + card('Equipamentos / materiais', `<div class="checks">${EQUIPAMENTOS.map(([k, l]) => chk(`equip.${k}`, l)).join('')}</div>`)
@@ -609,6 +616,23 @@ function svgGrafico(f, largura = 720) {
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Gráfico de PA e FC">${g}</svg>`;
 }
 
+// Pede os dados obrigatórios (anestesia, ventilação, acesso venoso) num único formulário.
+async function dlgObrigatorios() {
+  const falta = obrigatoriosFaltando(S.f);
+  await modal({
+    title: 'Dados da anestesia',
+    body: `<p class="note ${falta.length ? 'warn' : ''}">${falta.length
+      ? `Preencha para poder finalizar a ficha: <b>${falta.join(', ')}</b>.`
+      : 'Confira os dados da anestesia.'}</p>${cardsObrigatorios()}`,
+    ok: 'Concluir', cancel: 'Depois',
+    onOpen: (d) => bind(d),
+  });
+  await salvarAgora();
+  const resta = obrigatoriosFaltando(S.f);
+  if (resta.length) toast(`Ainda falta: ${resta.join(', ')}`, 4000);
+  return !resta.length;
+}
+
 async function marcarTempo(k) {
   const l = TEMPOS.find((t) => t[0] === k)[1];
   if (!S.f.tempos[k]) {
@@ -625,6 +649,7 @@ async function marcarTempo(k) {
     else return;
   }
   await salvarAgora();
+  if (k === 'fimAnest' && S.f.tempos.fimAnest && obrigatoriosFaltando(S.f).length) await dlgObrigatorios();
   telaFicha();
 }
 
@@ -747,8 +772,6 @@ function pendencias(f) {
   if (!f.tempos.inicioAnest) p.push('Início da anestesia');
   if (!f.tempos.fimAnest) p.push('Fim da anestesia');
   if (!f.pac.intervencoes.some(Boolean)) p.push('Intervenção cirúrgica realizada');
-  const a = f.anest;
-  if (!(a.geral || a.geralIV || a.geralInal || a.geralBal || a.sedacao || a.local || a.locoregional || a.peridural || a.subaracnoidea || a.bloqueio)) p.push('Técnica anestésica');
   if (!f.vitais.length) p.push('Nenhum sinal vital registrado');
   if (!f.saida.destino) p.push('Encaminhamento (destino)');
   return p;
@@ -757,6 +780,7 @@ function pendencias(f) {
 function abaFim() {
   const f = S.f;
   const pend = pendencias(f);
+  const obrig = obrigatoriosFaltando(f);
   const acoesPdf = `<div class="btns">
       <button class="btn pri" id="bver">📄 Ver / imprimir PDF</button>
       <button class="btn" id="bshare">📤 Compartilhar</button>
@@ -764,9 +788,11 @@ function abaFim() {
   let topo;
   if (f.status === 'rascunho') {
     topo = card('Finalizar ficha', `
-      ${pend.length ? `<div class="note warn"><b>Itens não preenchidos:</b><ul class="pend">${pend.map((x) => `<li>${x}</li>`).join('')}</ul>Você pode finalizar mesmo assim.</div>` : '<p class="note">Tudo pronto para finalizar.</p>'}
+      ${obrig.length ? `<div class="note bad"><b>Obrigatório para finalizar:</b><ul class="pend">${obrig.map((x) => `<li>${x}</li>`).join('')}</ul>
+        <button class="btn pri" id="bobrig">✏️ Preencher agora</button></div>` : ''}
+      ${pend.length ? `<div class="note warn"><b>Itens não preenchidos:</b><ul class="pend">${pend.map((x) => `<li>${x}</li>`).join('')}</ul>Estes itens não impedem a finalização.</div>` : obrig.length ? '' : '<p class="note">Tudo pronto para finalizar.</p>'}
       <p class="small muted">Depois de finalizada, a ficha fica bloqueada. Correções só com a sua senha, e ficam registradas no histórico.</p>
-      <button class="btn ok big block" id="bfin">✅ Finalizar e gerar PDF</button>`)
+      <button class="btn ok big block" id="bfin" ${obrig.length ? 'disabled' : ''}>✅ Finalizar e gerar PDF</button>`)
       + card('Pré-visualização', `<p class="small muted">O PDF sai com a marca “RASCUNHO” até a ficha ser finalizada.</p>${acoesPdf}`)
       + card('Excluir', `<button class="btn bad" id="bdel">🗑️ Excluir este rascunho</button>`);
   } else if (f.status === 'finalizada') {
@@ -791,7 +817,9 @@ function ligarFim() {
   $('#bver')?.addEventListener('click', () => acaoPdf('ver'));
   $('#bshare')?.addEventListener('click', () => acaoPdf('share'));
   $('#bbaixar')?.addEventListener('click', () => acaoPdf('baixar'));
+  $('#bobrig')?.addEventListener('click', async () => { await dlgObrigatorios(); telaFicha(); });
   $('#bfin')?.addEventListener('click', async () => {
+    if (obrigatoriosFaltando(f).length && !(await dlgObrigatorios())) return telaFicha();
     if (!(await confirmar('Finalizar ficha', 'Após finalizar, a ficha fica bloqueada para edição (correções só com senha). Confirmar?', 'Finalizar', 'ok'))) return;
     f.status = 'finalizada';
     f.finalizadaEm = new Date().toISOString();
@@ -820,6 +848,7 @@ function ligarFim() {
     go(`#/ficha/${f.id}/pac`);
   });
   $('#bconc')?.addEventListener('click', async () => {
+    if (obrigatoriosFaltando(f).length && !(await dlgObrigatorios())) return telaFicha();
     const alt = diferencas(f.revisaoBase, f);
     delete f.revisaoBase;
     f.status = 'finalizada';

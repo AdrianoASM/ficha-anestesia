@@ -189,7 +189,8 @@ function pagina1(P, f, logo, favoritos) {
   P.v(`CRM ${an.crm}${an.uf ? '/' + an.uf : ''}`, 71.3, 45.6, { align: 'center', size: 7 });
   P.line(45, 46.8, 97.5, 46.8, 0.15);
   P.t('Anestesiologista', 71.3, 50, { size: 6.5, align: 'center' });
-  P.campo('Cirurgião', a.cirurgiao, 45, 56, 97.5, { size: 6.5 });
+  P.campo('Cirurgião', a.cirurgiao, 45, 56, 79.5, { size: 6.5 });
+  P.campo('CRM', a.cirurgiaoCrm, 80.5, 56, 97.5, { size: 6.5 });
   P.campo('1º Auxiliar', a.aux1, 45, 61, 97.5, { size: 6.5 });
   P.campo('2º Auxiliar', a.aux2, 45, 66, 97.5, { size: 6.5 });
 
@@ -614,11 +615,14 @@ function pagina2(P, f) {
   }
   {
     P.t('USO DE MEDICAMENTOS', (X[3] + X[4]) / 2, Y[2] + 3.3, { size: 6.3, bold: true, align: 'center' });
-    p.medicamentos.forEach((m, i) => {
-      const y = Y[2] + 8.5 + i * 5.5;
-      P.t(String(i + 1), X[3] + 1, y, { size: 7 });
-      P.line(X[3] + 4, y + 0.5, X[4] - 3, y + 0.5, 0.12);
-      P.v(m, X[3] + 4.3, y, { size: 6.8, maxW: X[4] - X[3] - 8 });
+    // duas colunas de 6 linhas
+    const cw = (X[4] - X[3]) / 2;
+    p.medicamentos.slice(0, 12).forEach((m, i) => {
+      const cx = X[3] + (i < 6 ? 0 : cw);
+      const y = Y[2] + 6.9 + (i % 6) * 2.75;
+      P.t(String(i + 1), cx + 1, y, { size: 5 });
+      P.line(cx + 4, y + 0.4, cx + cw - 1, y + 0.4, 0.1);
+      P.v(m, cx + 4.2, y - 0.1, { size: 5, maxW: cw - 5.5 });
     });
   }
   bloco('neuro', 0, 3); bloco('hemato', 1, 3); bloco('habitos', 2, 3);
