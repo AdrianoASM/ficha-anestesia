@@ -17,6 +17,22 @@
   <nav class="tabs" id="tabs" hidden></nav>
   <dialog id="modal"></dialog>
   <div id="toast" role="status" aria-live="polite"></div>
+  <script>
+    // Se algo falhar ao abrir o app, mostra o erro na tela (em vez de ficar em branco).
+    (function () {
+      var erros = [];
+      function mostrar() {
+        var app = document.getElementById('app');
+        if (!app || app.children.length) return;
+        app.innerHTML = '<div style="margin:20px;padding:16px;border-radius:12px;background:#fbe5e3;color:#7a1c16;font:15px system-ui">' +
+          '<b>O app não conseguiu abrir.</b><br>Tire um print desta tela e envie ao desenvolvedor.<pre style="white-space:pre-wrap;font-size:12px;margin-top:10px">' +
+          (erros.join(' | ') || 'Sem mensagem de erro.').replace(/[<&]/g, function (c) { return c === '<' ? '&lt;' : '&amp;'; }) + '</pre></div>';
+      }
+      window.addEventListener('error', function (e) { erros.push((e.message || 'erro') + ' @ ' + (e.filename || '').split('/').pop() + ':' + (e.lineno || '')); mostrar(); });
+      window.addEventListener('unhandledrejection', function (e) { erros.push(String(e.reason && (e.reason.stack || e.reason.message) || e.reason)); mostrar(); });
+      setTimeout(mostrar, 6000);
+    })();
+  </script>
   <script src="lib/jspdf.umd.min.js"></script>
   <script type="module" src="js/app.js"></script>
 </body>

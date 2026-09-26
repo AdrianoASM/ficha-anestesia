@@ -10,12 +10,16 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const APP_VERSAO = '1.0';
+const APP_VERSAO = '1.0.1';
 const DESENVOLVEDOR = 'Adriano A S Mendonça';
 
 // Rodando dentro do APK Android (Capacitor)?
 const NATIVO = !!window.Capacitor?.isNativePlatform?.();
-const Arquivos = NATIVO ? window.Capacitor.registerPlugin('Arquivos') : null;
+// Chama o plugin nativo "Arquivos" (ArquivosPlugin.java) pela ponte do Capacitor.
+// Obs.: registerPlugin() só existe no pacote JS @capacitor/core; a ponte nativa oferece nativePromise().
+const Arquivos = NATIVO
+  ? new Proxy({}, { get: (_, metodo) => (opcoes = {}) => window.Capacitor.nativePromise('Arquivos', metodo, opcoes) })
+  : null;
 
 const S = { fichas: [], f: null, aba: 'pac', logo: null, timer: null, wake: null, filtro: '' };
 
@@ -49,6 +53,12 @@ const nomeUser = (u) => `${u.nome} — CRM ${u.crm}${u.uf ? '/' + u.uf : ''}`;
 const agoraHM = () => hhmm(new Date().toISOString());
 const normNum = (v) => String(v ?? '').trim().replace(',', '.');
 
+// No Android, o toque que fecha um diálogo pode gerar um segundo clique na tela que aparece embaixo.
+let bloqueioCliqueAte = 0;
+document.addEventListener('click', (e) => {
+  if (Date.now() < bloqueioCliqueAte && !e.target.closest?.('dialog')) { e.stopPropagation(); e.preventDefault(); }
+}, true);
+
 function modal({ title, body, ok = 'Salvar', cancel = 'Cancelar', extra = [], onOpen, okClass = 'pri' }) {
   return new Promise((resolve) => {
     const d = $('#modal');
@@ -78,6 +88,7 @@ function modal({ title, body, ok = 'Salvar', cancel = 'Cancelar', extra = [], on
     const fim = (v) => {
       if (feito) return;
       feito = true;
+      bloqueioCliqueAte = Date.now() + 450; // evita que o toque "atravesse" para a tela de baixo
       const data = Object.fromEntries(new FormData(form));
       if (d.open) d.close();
       resolve({ v, data, el: d });
@@ -230,7 +241,6 @@ async function telaLogin() {
   $('#bnovo').onclick = () => telaCadastro(false);
   $('#besq').onclick = () => esqueciSenha(users, sel);
   $('#brest').onclick = () => restaurarBackup();
-  if (NATIVO) ligarArmazenamento();
 }
 
 function telaCadastro(primeiro) {
@@ -1096,6 +1106,7 @@ function telaConfig() {
   $('#bbk').onclick = () => backup('share');
   $('#bbkd').onclick = () => backup('baixar');
   $('#brest').onclick = () => restaurarBackup();
+  if (NATIVO) ligarArmazenamento();
   const salvarFavs = async (lista) => { u.favoritos = lista; await store.salvarUsuario(); telaConfig(); };
   const editarFav = async (i) => {
     const x = i >= 0 ? favs[i] : { nome: '', unid: 'mg', via: 'IV', dose: '', amp: '' };
