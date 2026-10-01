@@ -11,7 +11,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const APP_VERSAO = '1.1.0';
+const APP_VERSAO = '1.1.1';
 const DESENVOLVEDOR = 'Adriano A S Mendonça';
 
 // Rodando dentro do APK Android (Capacitor)?
@@ -330,6 +330,22 @@ async function lerJSON(nome) {
   return JSON.parse(deB64(r.base64));
 }
 
+// Cadastros de outros aparelhos presentes na pasta (ignora os já substituídos numa unificação).
+async function cadastrosDaPasta(arquivos, idAtual) {
+  const out = [];
+  for (const a of arquivos.filter((x) => /^usuario-.+\.json$/.test(x.nome))) {
+    try {
+      const d = await lerJSON(a.nome);
+      if (d?.user?.id && d.user.id !== idAtual && !d.substituidoPor) out.push(d.user);
+    } catch (e) { console.warn('sync: cadastro ilegível', a.nome, e); }
+  }
+  return out;
+}
+const soDigitos = (v) => String(v ?? '').replace(/\D/g, '');
+const mesmoAnestesista = (a, b) => soDigitos(a.crm) && soDigitos(a.crm) === soDigitos(b.crm);
+// Regra fixa para os dois aparelhos convergirem: fica sempre o cadastro mais antigo.
+const maisAntigo = (a, b) => (a.criadoEm || '') < (b.criadoEm || '') || ((a.criadoEm || '') === (b.criadoEm || '') && a.id < b.id);
+
 let sincronizando = null;
 async function sincronizar({ silencioso = true } = {}) {
   if (!syncAtivo()) { if (!silencioso) toast('Escolha uma pasta (Configurações) para sincronizar.'); return; }
@@ -341,6 +357,10 @@ async function sincronizar({ silencioso = true } = {}) {
     try {
       await gravarJSON(`usuario-${u.id}.json`, store.usuarioParaPasta());
       const { arquivos } = await Arquivos.listarArquivos({ pasta: armazenamento().uri, subpasta: SUB_DADOS });
+      st.nFichas = arquivos.filter((a) => /^ficha-.+\.json$/.test(a.nome)).length;
+      const outros = await cadastrosDaPasta(arquivos, u.id);
+      st.nCadastros = outros.length + 1;
+      S.cadastroParaUnificar = outros.filter((c) => mesmoAnestesista(c, u) && maisAntigo(c, u)).sort((a, b) => (maisAntigo(a, b) ? -1 : 1))[0] || null;
       for (const a of arquivos) {
         if (!/^ficha-.+\.json$/.test(a.nome) || st.lidos[a.nome] === a.modificado) continue;
         try {
@@ -362,6 +382,7 @@ async function sincronizar({ silencioso = true } = {}) {
         if (S.f) S.f = S.fichas.find((x) => x.id === S.f.id) || S.f;
         if (!S.f && location.hash.startsWith('#/lista')) telaLista();
       }
+      if (S.cadastroParaUnificar && !recebidas && !S.f && location.hash.startsWith('#/lista') && !$('#bunif')) telaLista();
       if (!silencioso || recebidas) toast(`Sincronizado: ${recebidas} recebida(s), ${enviadas} enviada(s)`, 3500);
     } catch (e) {
       if (!silencioso) toast('Erro ao sincronizar: ' + e.message, 6000);
@@ -408,7 +429,10 @@ function telaLista() {
   const lista = S.fichas.filter((f) => !q || `${f.pac.nome} ${f.pac.convenio} ${f.pre.procedimento} ${f.pac.intervencoes.join(' ')}`.toLowerCase().includes(q));
   const rotulo = { rascunho: 'Em andamento', finalizada: 'Finalizada', revisao: 'Em revisão' };
   const semPasta = NATIVO && !armazenamento().uri && !armazenamento().modo;
-  $('#app').innerHTML = `${blocoInstalar()}${semPasta ? `<div class="note warn">📁 Escolha onde salvar os PDFs das fichas (celular ou nuvem). <button class="btn" id="birpasta" style="margin-top:6px">Configurar agora</button></div>` : ''}
+  const unif = S.cadastroParaUnificar;
+  $('#app').innerHTML = `${blocoInstalar()}${unif ? `<div class="note warn">📱 <b>Encontramos o seu cadastro criado em outro aparelho</b> (${esc(nomeUser(unif))}).
+      Para as fichas sincronizarem, os dois aparelhos precisam usar <b>o mesmo cadastro</b>.
+      <div style="margin-top:8px"><button class="btn pri" id="bunif">Unificar agora</button></div></div>` : ''}${semPasta ? `<div class="note warn">📁 Escolha onde salvar os PDFs das fichas (celular ou nuvem). <button class="btn" id="birpasta" style="margin-top:6px">Configurar agora</button></div>` : ''}
     <div class="toolbar">
       <input type="search" id="busca" placeholder="Buscar paciente, procedimento…" value="${esc(S.filtro)}">
       <button class="btn pri big" id="bnova">＋ Nova ficha</button>
@@ -422,6 +446,7 @@ function telaLista() {
     </div>`;
   ligarInstalar();
   $('#birpasta')?.addEventListener('click', () => go('#/config'));
+  $('#bunif')?.addEventListener('click', () => adotarCadastro(unif.id));
   $('#busca').oninput = (e) => { S.filtro = e.target.value; const p = e.target.selectionStart; telaLista(); const b = $('#busca'); b.focus(); b.setSelectionRange(p, p); };
   $('#bnova').onclick = async () => {
     const f = novaFicha(store.usuarioAtual());
@@ -1459,7 +1484,10 @@ function cardSync() {
   return card('Sincronização entre aparelhos', syncAtivo() ? `
     <p class="small">As fichas (criptografadas) ficam também em <b>${esc(armazenamento().nome)}/Dados</b>. Se essa pasta for sincronizada
       com a nuvem (ex.: DriveSync) nos dois aparelhos, cada um recebe as fichas do outro. Use o <b>mesmo cadastro</b> nos dois.</p>
-    <p class="small muted">Última sincronização: ${st.ultima ? dataHoraBR(st.ultima) : 'ainda não'}</p>
+    <p class="small muted">Última sincronização: ${st.ultima ? dataHoraBR(st.ultima) : 'ainda não'}
+      ${st.ultima ? `<br>Fichas na pasta Dados: <b>${st.nFichas ?? '?'}</b> · neste aparelho: <b>${S.fichas.length}</b>` : ''}</p>
+    <p class="small muted">Dica: no DriveSync, a sincronização dessa pasta precisa estar <b>nos dois sentidos</b> (“Two-way” / bidirecional)
+      nos dois aparelhos — se estiver só “enviar” (“Upload only”), um aparelho não recebe as fichas do outro.</p>
     <div class="btns"><button class="btn pri" id="bsyncnow">🔄 Sincronizar agora</button>
       <button class="btn" id="badotar">👥 Usar cadastro de outro aparelho</button></div>`
     : '<p class="small muted">Escolha uma pasta acima, com “Salvar automaticamente na pasta”, para ativar a sincronização.</p>');
@@ -1472,15 +1500,13 @@ function ligarSync() {
 
 // Usa neste aparelho o cadastro criado no outro (mesma chave = mesmas fichas) e traz para ele
 // as fichas do cadastro atual deste aparelho.
-async function adotarCadastro() {
+async function adotarCadastro(preferido) {
   const atual = store.usuarioAtual();
   let candidatos = [];
   try {
     const { arquivos } = await Arquivos.listarArquivos({ pasta: armazenamento().uri, subpasta: SUB_DADOS });
-    for (const a of arquivos.filter((x) => /^usuario-.+\.json$/.test(x.nome))) {
-      const d = await lerJSON(a.nome);
-      if (d?.user?.id && d.user.id !== atual.id) candidatos.push(d.user);
-    }
+    candidatos = (await cadastrosDaPasta(arquivos, atual.id))
+      .sort((a, b) => (a.id === preferido ? -1 : b.id === preferido ? 1 : (mesmoAnestesista(b, atual) - mesmoAnestesista(a, atual)) || (maisAntigo(a, b) ? -1 : 1)));
   } catch (e) { return toast('Não foi possível ler a pasta: ' + e.message, 5000); }
   if (!candidatos.length) {
     return modal({ title: 'Nenhum outro cadastro encontrado', ok: 'Entendi', cancel: '',
@@ -1489,7 +1515,7 @@ async function adotarCadastro() {
   }
   const r = await modal({
     title: 'Usar cadastro de outro aparelho',
-    body: `<p class="small">Escolha o cadastro e digite a <b>senha dele</b>. As ${S.fichas.length} ficha(s) do cadastro atual deste aparelho
+    body: `<p class="small">Escolha o cadastro e digite a <b>senha dele</b> (a senha que você usa no outro aparelho). As ${S.fichas.length} ficha(s) do cadastro atual deste aparelho
         (<b>${esc(atual.nome)}</b>) serão transferidas para ele, e o cadastro atual será removido daqui.</p>
       <input type="hidden" name="uid" value="${esc(candidatos[0].id)}">
       <div class="chips" data-name="uid" style="margin:8px 0">${candidatos.map((u) => `<button data-v="${esc(u.id)}">${esc(nomeUser(u))}</button>`).join('')}</div>
@@ -1504,6 +1530,9 @@ async function adotarCadastro() {
     const dadosDoAparelho = { armazenamento: atual.armazenamento, ultimoBackup: atual.ultimoBackup };
     await store.login(novo.id, r.data.senha);
     await store.unificarCadastro(fichasAntigas, atual.id, dadosDoAparelho);
+    // avisa o outro aparelho que este cadastro foi substituído (não oferecer de novo)
+    await gravarJSON(`usuario-${atual.id}.json`, { app: 'ficha-anestesia', tipo: 'usuario', substituidoPor: novo.id }).catch(() => {});
+    S.cadastroParaUnificar = null;
     try { localStorage.removeItem('sync:' + atual.id); } catch { /* ok */ }
     S.fichas = (await store.listarFichas()).map(normalizarFicha);
     toast(`Agora usando o cadastro de ${novo.nome}. ${fichasAntigas.length} ficha(s) transferida(s).`, 5000);
