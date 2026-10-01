@@ -11,7 +11,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const APP_VERSAO = '1.1.1';
+const APP_VERSAO = '1.1.2';
 const DESENVOLVEDOR = 'Adriano A S Mendonça';
 
 // Rodando dentro do APK Android (Capacitor)?
@@ -357,6 +357,9 @@ async function sincronizar({ silencioso = true } = {}) {
     try {
       await gravarJSON(`usuario-${u.id}.json`, store.usuarioParaPasta());
       const { arquivos } = await Arquivos.listarArquivos({ pasta: armazenamento().uri, subpasta: SUB_DADOS });
+      // pasta trocada: recomeça (lê e envia tudo de novo)
+      if (st.pasta !== armazenamento().uri) { st.pasta = armazenamento().uri; st.lidos = {}; st.enviados = {}; }
+      const naPasta = new Set(arquivos.map((a) => a.nome));
       st.nFichas = arquivos.filter((a) => /^ficha-.+\.json$/.test(a.nome)).length;
       const outros = await cadastrosDaPasta(arquivos, u.id);
       st.nCadastros = outros.length + 1;
@@ -370,12 +373,14 @@ async function sincronizar({ silencioso = true } = {}) {
         } catch (e) { console.warn('sync: arquivo ignorado', a.nome, e); }
       }
       for (const rec of await store.registrosDoUsuario()) {
-        if (st.enviados[rec.id] === rec.atualizadaEm) continue;
+        // reenvia se mudou OU se o arquivo não está na pasta (apagado, pasta nova, etc.)
+        if (st.enviados[rec.id] === rec.atualizadaEm && naPasta.has(`ficha-${rec.id}.json`)) continue;
         await gravarJSON(`ficha-${rec.id}.json`, rec);
         st.enviados[rec.id] = rec.atualizadaEm;
         enviadas++;
       }
       st.ultima = new Date().toISOString();
+      st.erro = '';
       st.gravar();
       if (recebidas) {
         S.fichas = (await store.listarFichas()).map(normalizarFicha);
@@ -385,6 +390,7 @@ async function sincronizar({ silencioso = true } = {}) {
       if (S.cadastroParaUnificar && !recebidas && !S.f && location.hash.startsWith('#/lista') && !$('#bunif')) telaLista();
       if (!silencioso || recebidas) toast(`Sincronizado: ${recebidas} recebida(s), ${enviadas} enviada(s)`, 3500);
     } catch (e) {
+      st.erro = `${dataHoraBR(new Date().toISOString())}: ${e.message}`; st.gravar();
       if (!silencioso) toast('Erro ao sincronizar: ' + e.message, 6000);
       console.warn('sync', e);
     } finally {
@@ -1489,13 +1495,58 @@ function cardSync() {
     <p class="small muted">Dica: no DriveSync, a sincronização dessa pasta precisa estar <b>nos dois sentidos</b> (“Two-way” / bidirecional)
       nos dois aparelhos — se estiver só “enviar” (“Upload only”), um aparelho não recebe as fichas do outro.</p>
     <div class="btns"><button class="btn pri" id="bsyncnow">🔄 Sincronizar agora</button>
-      <button class="btn" id="badotar">👥 Usar cadastro de outro aparelho</button></div>`
+      <button class="btn" id="badotar">👥 Usar cadastro de outro aparelho</button>
+      <button class="btn" id="bdiag">🔍 Diagnóstico</button></div>`
     : '<p class="small muted">Escolha uma pasta acima, com “Salvar automaticamente na pasta”, para ativar a sincronização.</p>');
 }
 
 function ligarSync() {
   $('#bsyncnow')?.addEventListener('click', async () => { await sincronizar({ silencioso: false }); telaConfig(); });
   $('#badotar')?.addEventListener('click', () => adotarCadastro());
+  $('#bdiag')?.addEventListener('click', () => diagnosticoSync());
+}
+
+// Mostra tudo o que o app enxerga na pasta Dados (para descobrir onde a sincronização trava).
+async function diagnosticoSync() {
+  const u = store.usuarioAtual();
+  const a = armazenamento();
+  const st = estadoSync();
+  const curto = (id) => String(id || '').slice(-5);
+  const linhas = [];
+  let arquivos = [];
+  try {
+    arquivos = (await Arquivos.listarArquivos({ pasta: a.uri, subpasta: SUB_DADOS })).arquivos;
+  } catch (e) { linhas.push(`<li style="color:var(--bad)">Erro ao listar a pasta: ${esc(e.message)}</li>`); }
+  arquivos.sort((x, y) => y.modificado - x.modificado);
+  let fichasMinhas = 0, fichasOutras = 0, cadOutros = 0;
+  for (const arq of arquivos) {
+    let desc = '';
+    try {
+      const d = await lerJSON(arq.nome);
+      if (/^usuario-/.test(arq.nome)) {
+        if (d.substituidoPor) desc = `cadastro antigo (substituído por …${curto(d.substituidoPor)})`;
+        else if (d.user?.id === u.id) desc = '<b>cadastro deste aparelho</b>';
+        else { desc = `<b style="color:var(--warn)">OUTRO cadastro</b>: ${esc(d.user?.nome)} — CRM ${esc(d.user?.crm)} · criado ${dataHoraBR(d.user?.criadoEm)}`; cadOutros++; }
+      } else if (/^ficha-/.test(arq.nome)) {
+        if (d.userId === u.id) { desc = d.excluida ? 'ficha excluída' : 'ficha deste cadastro'; fichasMinhas++; }
+        else { desc = `ficha de OUTRO cadastro (…${curto(d.userId)})`; fichasOutras++; }
+      } else desc = 'outro arquivo';
+    } catch (e) { desc = `<span style="color:var(--bad)">não foi possível ler: ${esc(e.message)}</span>`; }
+    linhas.push(`<li><code>${esc(arq.nome)}</code><br><span class="small">${new Date(arq.modificado).toLocaleString('pt-BR')} · ${desc}</span></li>`);
+  }
+  await modal({
+    title: 'Diagnóstico da sincronização', ok: 'Fechar', cancel: '',
+    body: `<p class="small"><b>Versão:</b> ${APP_VERSAO}<br>
+      <b>Cadastro deste aparelho:</b> ${esc(u.nome)} — CRM ${esc(u.crm)} · …${curto(u.id)} · criado ${dataHoraBR(u.criadoEm)}<br>
+      <b>Pasta:</b> ${esc(a.provedor || '')} › ${esc(a.nome || '(nenhuma)')} · modo: ${esc(a.modo || '—')}<br>
+      <span class="muted" style="word-break:break-all">${esc(a.uri || '')}</span><br>
+      <b>Última sincronização:</b> ${st.ultima ? dataHoraBR(st.ultima) : 'nunca'}${st.erro ? `<br><b style="color:var(--bad)">Último erro:</b> ${esc(st.erro)}` : ''}<br>
+      <b>Fichas neste aparelho:</b> ${S.fichas.length}</p>
+      <p class="note small">Na pasta <b>Dados</b>: ${arquivos.length} arquivo(s) — ${fichasMinhas} ficha(s) deste cadastro,
+        ${fichasOutras} de outro cadastro, ${cadOutros} outro(s) cadastro(s).</p>
+      <ul class="audit" style="padding-left:18px">${linhas.join('') || '<li>Pasta Dados vazia.</li>'}</ul>
+      <p class="small muted">Tire um print desta tela (role até o fim) e envie ao desenvolvedor.</p>`,
+  });
 }
 
 // Usa neste aparelho o cadastro criado no outro (mesma chave = mesmas fichas) e traz para ele
