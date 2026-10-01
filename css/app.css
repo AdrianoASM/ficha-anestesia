@@ -229,3 +229,17 @@ table.ald { width: 100%; border-collapse: collapse; font-size: 14px; }
 table.ald td, table.ald th { border-bottom: 1px solid var(--line); padding: 6px 4px; text-align: left; }
 .ald-tempo { margin-bottom: 12px; }
 .ald-tot { font-size: 20px; font-weight: 700; color: var(--pri); }
+
+.calc { min-height: var(--tap); display: flex; align-items: center; padding: 8px 11px; border-radius: 10px;
+  background: var(--pri-soft); color: var(--text); font-weight: 700; font-size: 17px; }
+details.sis > summary { display: flex; justify-content: space-between; align-items: center; gap: 10px; cursor: pointer; list-style: none; font-size: 15.5px; }
+details.sis > summary::after { content: "▾"; color: var(--muted); }
+details.sis[open] > summary::after { content: "▴"; }
+details.sis > summary + * { margin-top: 10px; }
+.sis-st { margin-left: auto; font-size: 13px; color: var(--pri); font-weight: 600; }
+.grid.med { grid-template-columns: 2fr 1.3fr 1.4fr; align-items: end; margin-bottom: 6px; }
+@media (max-width: 520px) { .grid.med { grid-template-columns: 1fr 1fr; } .grid.med > :first-child { grid-column: 1 / -1; } }
+.tl .ev.in { border-left: 4px solid #d35400; }
+.inf-bts { display: flex; flex-direction: column; gap: 6px; }
+.inf-bts .btn { min-height: 38px; padding: 0 12px; }
+@media (min-width: 700px) { .acoes { grid-template-columns: repeat(5, 1fr); } }

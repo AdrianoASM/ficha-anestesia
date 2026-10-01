@@ -3,6 +3,7 @@ import {
   VIAS, UNIDADES, DROGAS_PADRAO, FLUIDOS, EVENTOS_RAPIDOS, MONITORIZACAO, EQUIPAMENTOS,
   PRE_GRUPOS, ALDRETE, ALDRETE_TEMPOS, novaFicha, uid, hhmm, dataBR, dataHoraBR, horaParaISO,
   calcBalanco, aldreteTotal, num, pad, N_MEDICAMENTOS, normalizarFicha, obrigatoriosFaltando,
+  INFUSOES, UNID_INFUSAO, imc, totalInfusao, rotuloInfusao, normNumero,
 } from './model.js';
 import { gerarPDF } from './pdf.js';
 
@@ -10,7 +11,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const APP_VERSAO = '1.0.1';
+const APP_VERSAO = '1.1.0';
 const DESENVOLVEDOR = 'Adriano A S Mendonça';
 
 // Rodando dentro do APK Android (Capacitor)?
@@ -51,6 +52,7 @@ const favoritos = () => store.usuarioAtual()?.favoritos || DROGAS_PADRAO;
 const bloqueada = () => S.f?.status === 'finalizada';
 const nomeUser = (u) => `${u.nome} — CRM ${u.crm}${u.uf ? '/' + u.uf : ''}`;
 const agoraHM = () => hhmm(new Date().toISOString());
+const hojeLocal = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const normNum = (v) => String(v ?? '').trim().replace(',', '.');
 
 // No Android, o toque que fecha um diálogo pode gerar um segundo clique na tela que aparece embaixo.
@@ -126,6 +128,13 @@ function agendarSalvar() {
   clearTimeout(saveT);
   saveT = setTimeout(salvarAgora, 350);
 }
+let envioT = null;
+function agendarEnvio() {
+  if (!syncAtivo()) return;
+  clearTimeout(envioT);
+  envioT = setTimeout(() => sincronizar(), 8000);
+}
+
 async function salvarAgora() {
   clearTimeout(saveT);
   if (!S.f) return;
@@ -135,6 +144,7 @@ async function salvarAgora() {
     if (i >= 0) S.fichas[i] = S.f; else S.fichas.unshift(S.f);
     const s = $('#saved');
     if (s) s.textContent = `salvo ${agoraHM()}`;
+    agendarEnvio();
   } catch (e) {
     console.error(e);
     toast('Erro ao salvar! ' + e.message, 6000);
@@ -294,17 +304,106 @@ async function esqueciSenha(users, sel) {
   } catch (e) { toast(e.message); }
 }
 
+// ---------------------------------------------------------------- sincronização entre aparelhos
+// Cada ficha (cifrada) vira um arquivo em <pasta escolhida>/Dados/. O DriveSync (ou similar) leva a pasta
+// para a nuvem e traz para o outro aparelho. Vale sempre a versão mais recente de cada ficha.
+const SUB_DADOS = 'Dados';
+const paraB64 = (txt) => { const b = new TextEncoder().encode(txt); let s = ''; for (let i = 0; i < b.length; i += 8192) s += String.fromCharCode(...b.subarray(i, i + 8192)); return btoa(s); };
+const deB64 = (b64) => new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+const syncAtivo = () => NATIVO && armazenamento().modo === 'pasta' && !!armazenamento().uri;
+
+function estadoSync() {
+  const k = 'sync:' + store.usuarioAtual().id;
+  let st;
+  try { st = JSON.parse(localStorage.getItem(k)) || {}; } catch { st = {}; }
+  st.lidos ||= {}; st.enviados ||= {};
+  st.gravar = () => { try { const { gravar, ...r } = st; void gravar; localStorage.setItem(k, JSON.stringify(r)); } catch { /* sem armazenamento local */ } };
+  return st;
+}
+
+async function gravarJSON(nome, obj) {
+  await Arquivos.salvarNaPasta({ pasta: armazenamento().uri, subpasta: SUB_DADOS, nome, mime: 'application/json', base64: paraB64(JSON.stringify(obj)) });
+}
+
+async function lerJSON(nome) {
+  const r = await Arquivos.lerArquivo({ pasta: armazenamento().uri, subpasta: SUB_DADOS, nome });
+  return JSON.parse(deB64(r.base64));
+}
+
+let sincronizando = null;
+async function sincronizar({ silencioso = true } = {}) {
+  if (!syncAtivo()) { if (!silencioso) toast('Escolha uma pasta (Configurações) para sincronizar.'); return; }
+  if (sincronizando) return sincronizando;
+  sincronizando = (async () => {
+    const u = store.usuarioAtual();
+    const st = estadoSync();
+    let recebidas = 0, enviadas = 0;
+    try {
+      await gravarJSON(`usuario-${u.id}.json`, store.usuarioParaPasta());
+      const { arquivos } = await Arquivos.listarArquivos({ pasta: armazenamento().uri, subpasta: SUB_DADOS });
+      for (const a of arquivos) {
+        if (!/^ficha-.+\.json$/.test(a.nome) || st.lidos[a.nome] === a.modificado) continue;
+        try {
+          const rec = await lerJSON(a.nome);
+          if (rec.userId === u.id && await store.importarRegistro(rec)) recebidas++;
+          st.lidos[a.nome] = a.modificado;
+        } catch (e) { console.warn('sync: arquivo ignorado', a.nome, e); }
+      }
+      for (const rec of await store.registrosDoUsuario()) {
+        if (st.enviados[rec.id] === rec.atualizadaEm) continue;
+        await gravarJSON(`ficha-${rec.id}.json`, rec);
+        st.enviados[rec.id] = rec.atualizadaEm;
+        enviadas++;
+      }
+      st.ultima = new Date().toISOString();
+      st.gravar();
+      if (recebidas) {
+        S.fichas = (await store.listarFichas()).map(normalizarFicha);
+        if (S.f) S.f = S.fichas.find((x) => x.id === S.f.id) || S.f;
+        if (!S.f && location.hash.startsWith('#/lista')) telaLista();
+      }
+      if (!silencioso || recebidas) toast(`Sincronizado: ${recebidas} recebida(s), ${enviadas} enviada(s)`, 3500);
+    } catch (e) {
+      if (!silencioso) toast('Erro ao sincronizar: ' + e.message, 6000);
+      console.warn('sync', e);
+    } finally {
+      sincronizando = null;
+    }
+  })();
+  return sincronizando;
+}
+
+// rascunho excluído: avisa o outro aparelho com um "registro de exclusão"
+async function sincronizarExclusao(id) {
+  if (!syncAtivo()) return;
+  try {
+    await gravarJSON(`ficha-${id}.json`, { id, userId: store.usuarioAtual().id, atualizadaEm: new Date().toISOString(), excluida: true });
+  } catch (e) { console.warn('sync exclusão', e); }
+}
+
+let ultimaSync = 0;
+function sincronizarDeVezEmQuando() {
+  if (!syncAtivo() || Date.now() - ultimaSync < 20000) return;
+  ultimaSync = Date.now();
+  sincronizar();
+}
+
 async function entrar() {
-  S.fichas = await store.listarFichas();
+  S.fichas = (await store.listarFichas()).map(normalizarFicha);
   go('#/lista');
+  ultimaSync = Date.now();
+  sincronizar();
 }
 
 // ---------------------------------------------------------------- lista
 function telaLista() {
   const u = store.usuarioAtual();
   topbar(`<img src="icons/logo.png" alt=""><div class="ttl"><b>Minhas fichas</b><small>${esc(nomeUser(u))}</small></div>
+    ${syncAtivo() ? '<button id="bsync" title="Sincronizar agora" aria-label="Sincronizar agora">🔄</button>' : ''}
     <button id="bcfg" title="Configurações" aria-label="Configurações">⚙️</button>`);
   $('#bcfg').onclick = () => go('#/config');
+  $('#bsync')?.addEventListener('click', () => sincronizar({ silencioso: false }));
+  sincronizarDeVezEmQuando();
   const q = S.filtro.toLowerCase();
   const lista = S.fichas.filter((f) => !q || `${f.pac.nome} ${f.pac.convenio} ${f.pre.procedimento} ${f.pac.intervencoes.join(' ')}`.toLowerCase().includes(q));
   const rotulo = { rascunho: 'Em andamento', finalizada: 'Finalizada', revisao: 'Em revisão' };
@@ -395,10 +494,17 @@ function bind(root) {
 
 function mudou(path) {
   agendarSalvar();
+  if (path === 'pac.nascimento' && S.f.pac.nascimento) {
+    const n = new Date(S.f.pac.nascimento + 'T12:00'), ref = new Date((S.f.pac.data || hojeLocal()) + 'T12:00');
+    let anos = ref.getFullYear() - n.getFullYear();
+    if (ref < new Date(ref.getFullYear(), n.getMonth(), n.getDate(), 12)) anos--;
+    if (anos >= 0) { S.f.pac.idade = String(anos); const el = $('[data-f="pac.idade"]'); if (el) el.value = anos; }
+  }
   if (path === 'pac.nome') { const b = $('.topbar .ttl b'); if (b) b.textContent = S.f.pac.nome || 'Nova ficha'; }
   $$('[data-calc]').forEach((el) => {
     const [tipo, arg] = el.dataset.calc.split(':');
     if (tipo === 'ald') el.textContent = aldreteTotal(S.f, arg) === '' ? '–' : aldreteTotal(S.f, arg);
+    if (tipo === 'imc') el.textContent = imc(S.f) ? num(imc(S.f)) : '–';
   });
 }
 
@@ -415,9 +521,12 @@ function abaPaciente() {
   const f = S.f;
   return card('Paciente', `<div class="grid">
       ${inp('pac.nome', 'Nome', { cls: 'full' })}
+      ${inp('pac.nascimento', 'Data de nascimento', { type: 'date' })}
       ${inp('pac.idade', 'Idade', { im: 'numeric' })}
-      ${inp('pac.data', 'Data', { type: 'date' })}
+      ${inp('pac.data', 'Data da cirurgia', { type: 'date' })}
       ${inp('pac.peso', 'Peso (kg)', { im: 'decimal' })}
+      ${inp('pac.altura', 'Altura (cm)', { im: 'numeric' })}
+      <label class="f">IMC (kg/m²)<span class="calc" data-calc="imc">${imc(f) ? num(imc(f)) : '–'}</span></label>
       ${inp('pac.jejum', 'Jejum (h)', { im: 'decimal' })}
       ${inp('pac.convenio', 'Convênio')}
       ${inp('pac.matricula', 'Matrícula')}
@@ -436,30 +545,77 @@ function abaPaciente() {
 }
 
 function abaPre() {
-  const grupos = PRE_GRUPOS.map(([k, titulo, itens, outro]) => `
-    <section class="card"><h3>${titulo}</h3><div class="checks">
-      ${itens.map(([ik, il]) => chk(`pre.itens.${k}_${ik}`, il)).join('')}</div>
-      ${k === 'endocrino' ? `<div class="grid" style="margin-top:8px">${inp('pre.diabetesTipo', 'Diabetes tipo', { im: 'numeric' })}</div>` : ''}
-      ${k === 'habitos' ? `<div class="grid" style="margin-top:8px">${inp('pre.cigarros', 'Cigarros/dia', { im: 'numeric' })}</div>` : ''}
-      ${outro ? `<div class="grid g2" style="margin-top:8px">${inp(`pre.outros.${k}`, 'Outro')}</div>` : ''}
-    </section>`).join('');
-  return card('Avaliação pré-anestésica', `<div class="grid g2">
-      ${inp('pre.diagnostico', 'Diagnóstico pré-operatório')}
-      ${inp('pre.procedimento', 'Cirurgia / procedimento proposto')}</div>`)
-  + card('Classificação', `
-      ${linha('ASA', chips('pre.asa', ['I', 'II', 'III', 'IV', 'V']))}
-      ${linha('Emergência', chips('pre.emergencia', SN))}
+  const p = S.f.pre;
+  const marcados = (k, itens) => itens.filter(([ik]) => p.itens[`${k}_${ik}`]).length + (p.outros[k] ? 1 : 0);
+  const extras = {
+    cardio: inp('pre.toleranciaExercicio', 'Tolerância ao exercício', { cls: 'span2', ph: 'ex.: sobe 2 lances de escada' }),
+    endocrino: inp('pre.diabetesTipo', 'Diabetes tipo', { im: 'numeric' }),
+    habitos: inp('pre.cigarros', 'Cigarros/dia', { im: 'numeric' }),
+  };
+  const grupos = PRE_GRUPOS.map(([k, titulo, itens]) => {
+    const n = marcados(k, itens);
+    return `<details class="card sis" ${n ? 'open' : ''}>
+      <summary><b>${titulo}</b><span class="sis-st">${n ? `${n} marcado(s)` : p.negativos[k] ? 'Negativo' : ''}</span></summary>
+      <label class="chk na"><input type="checkbox" data-f="pre.negativos.${k}">Negativo</label>
+      <div class="checks">${itens.map(([ik, il]) => chk(`pre.itens.${k}_${ik}`, il)).join('')}</div>
+      <div class="grid" style="margin-top:8px">${extras[k] || ''}${inp(`pre.outros.${k}`, 'Outras', { cls: 'span2' })}</div>
+    </details>`;
+  }).join('');
+  return card('Avaliação pré-anestésica', `<div class="grid">
+      ${inp('pre.dataAval', 'Data da avaliação', { type: 'date' })}${inp('pre.horaAval', 'Hora', { type: 'time' })}
+      ${inp('pre.diagnostico', 'Diagnóstico pré-operatório', { cls: 'span2' })}
+      ${inp('pre.procedimento', 'Cirurgia / procedimento proposto', { cls: 'span2' })}</div>`)
+  + card('Sinais e jejum', `<div class="grid">
+      ${inp('pac.peso', 'Peso (kg)', { im: 'decimal' })}${inp('pac.altura', 'Altura (cm)', { im: 'numeric' })}
+      <label class="f">IMC<span class="calc" data-calc="imc">${imc(S.f) ? num(imc(S.f)) : '–'}</span></label>
+      ${inp('pre.pa', 'PA (mmHg)', { ph: '120/80' })}${inp('pre.fc', 'FC (bpm)', { im: 'numeric' })}
+      ${inp('pre.temp', 'Temp. (°C)', { im: 'decimal' })}${inp('pre.fr', 'FR (irpm)', { im: 'numeric' })}
+      ${inp('pre.jejumSolidos', 'Jejum sólidos (h)', { im: 'decimal' })}${inp('pre.jejumLiquidos', 'Jejum líquidos (h)', { im: 'decimal' })}
+      ${inp('pre.dor', 'Dor (escala)', { im: 'numeric', ph: '0–10' })}</div>
+      ${linha('Escala de dor', chips('pre.dorEscala', [['Adulto', 'Adulto 0–10'], ['Criança', 'Criança (faces) 0–5']]))}`)
+  + `<p class="muted small" style="margin:4px 2px 10px">Sistemas: toque em “Negativo” ou abra o sistema para marcar os achados.</p>`
+  + `<div class="cols2"><div>${grupos}</div><div>`
+  + card('Câncer', `${chips('pre.cancer', ['Negativo', 'Positivo'])}
+      <div class="grid" style="margin-top:8px">${inp('pre.cancerLocal', 'Local', { cls: 'span2' })}</div>
+      <div class="checks" style="margin-top:8px">${chk('pre.qt', 'Quimioterapia')}${chk('pre.rt', 'Radioterapia')}</div>`)
+  + (S.f.pac.sexo !== 'M' ? card('Gravidez', `${chips('pre.gravidez', ['Negativo', 'Positivo'])}
+      <div class="grid" style="margin-top:8px">${inp('pre.igSemanas', 'Idade gestacional (sem.)', { im: 'numeric' })}${inp('pre.dum', 'DUM', { type: 'date' })}</div>`) : '')
+  + card('Outras comorbidades', `<textarea data-f="pre.outrosGeral" rows="2" placeholder="Hematológicas, músculo-esqueléticas e outras"></textarea>`)
+  + card('Históricos', `${linha('Náuseas / vômitos pós-op.', chips('pre.nvpo', SN))}
+      ${linha('Familiar de problemas anestésicos', chips('pre.histFamiliar', SN))}`)
+  + `</div></div>`
+  + `<div class="cols2"><div>`
+  + card('Alergias', `<label class="chk na"><input type="checkbox" data-f="pre.alergiaNeg">Negativo</label>
+      ${[0, 1, 2].map((i) => `<div class="grid">${inp(`pre.alergias.${i}.agente`, `${i + 1}. Tipo / agente`)}${inp(`pre.alergias.${i}.reacao`, 'Reação')}</div>`).join('')}`)
+  + card('Cirurgia / anestesia prévia', `<label class="chk na"><input type="checkbox" data-f="pre.previaNeg">Negativo</label>
+      ${[0, 1, 2].map((i) => `<div class="grid">${inp(`pre.previas.${i}.cirurgia`, `${i + 1}. Cirurgia`)}${inp(`pre.previas.${i}.anestesia`, 'Anestesia')}${inp(`pre.previas.${i}.dados`, 'Dados relevantes', { cls: 'span2' })}</div>`).join('')}`)
+  + `</div><div>`
+  + card('Medicação em uso', [...Array(N_MEDICAMENTOS).keys()].map((i) => `<div class="grid med">
+      ${inp(`pre.medicamentos.${i}.nome`, `${i + 1}. Medicação`)}${inp(`pre.medicamentos.${i}.dose`, 'Dose diária')}
+      <label class="f">Últimas 24 h?${chips(`pre.medicamentos.${i}.ult24`, SN)}</label></div>`).join(''))
+  + `</div></div>`
+  + `<div class="cols2"><div>`
+  + card('Via aérea', `${linha('História de via aérea difícil', chips('pre.vad', SN))}
+      ${linha('Pescoço', chips('pre.pescoco', ['Normal', ['Largo', 'Largo (>40 cm)'], 'Curto']))}
+      ${linha('Protrusão da mandíbula normal', chips('pre.protrusao', SN))}
+      ${linha('Flexão / extensão do pescoço', chips('pre.flexao', ['Normal', 'Limitada']))}
+      ${linha('Previsão de via aérea difícil', chips('pre.previsaoVad', SN))}
       ${linha('Mallampati', chips('pre.mallampati', ['I', 'II', 'III', 'IV']))}
-      ${linha('Hist. via aérea difícil', chips('pre.vad', SN))}
-      ${linha('Reserva de sangue', chips('pre.reservaSangue', SN))}
-      ${linha('Hist. NVPO', chips('pre.nvpo', SN))}
-      ${linha('Hist. familiar de problemas anestésicos', chips('pre.histFamiliar', SN))}`)
-  + `<p class="muted small">Marque apenas os itens pertinentes.</p><div class="cols2"><div>${grupos}</div><div>`
-  + card('Câncer', `<div class="grid">${inp('pre.cancerLocal', 'Local', { cls: 'span2' })}</div><div class="checks" style="margin-top:8px">${chk('pre.qt', 'QT')}${chk('pre.rt', 'RT')}</div>`)
-  + card('Gravidez', `${chips('pre.gravidez', ['Negativo', 'Positivo'])}<div class="grid" style="margin-top:8px">${inp('pre.dum', 'DUM', { type: 'date' })}</div>`)
-  + card('Alergias', `<div class="grid g2">${[0, 1, 2].map((i) => inp(`pre.alergias.${i}`, `${i + 1}.`)).join('')}</div>`)
-  + card('Cirurgia / anestesia prévia', `<div class="grid g2">${[0, 1, 2].map((i) => inp(`pre.previas.${i}`, `${i + 1}.`)).join('')}</div>`)
-  + card('Uso de medicamentos', `<div class="grid g2">${[...Array(N_MEDICAMENTOS).keys()].map((i) => inp(`pre.medicamentos.${i}`, `${i + 1}.`)).join('')}</div>`)
+      <div class="grid g2">${inp('pre.viaOutros', 'Outros')}</div>`)
+  + card('Exame físico', `<div class="grid g2">${inp('pre.exame.cardiaco', 'Cardíaco')}${inp('pre.exame.resp', 'Respiratório')}
+      ${inp('pre.exame.neuro', 'Neurológico')}${inp('pre.exame.regional', 'Regional')}${inp('pre.exame.outro', 'Outro')}</div>`)
+  + card('Exames pré-operatórios', `<div class="grid">${[0, 1, 2, 3, 4, 5].map((i) => inp(`pre.examesPre.${i}`, '', { ph: 'ex.: Hb 12,5' })).join('')}</div>`)
+  + `</div><div>`
+  + card('Estado físico ASA', `${linha('ASA', chips('pre.asa', [['I', 'P1'], ['II', 'P2'], ['III', 'P3'], ['IV', 'P4'], ['V', 'P5']]))}
+      ${linha('Emergência', chips('pre.emergencia', SN))}`)
+  + card('Planejamento anestésico', `<div class="grid g2">${inp('pre.tecProposta', 'Técnica proposta')}${inp('pre.tecAlternativa', 'Técnica alternativa')}</div>`)
+  + card('Reserva de sangue / hemocomponentes', `${chips('pre.reservaSangue', SN)}
+      <div class="grid" style="margin-top:8px">${inp('pre.hemo.ch', 'Conc. hemácias (U)', { im: 'numeric' })}${inp('pre.hemo.plaq', 'Conc. plaquetas (U)', { im: 'numeric' })}
+      ${inp('pre.hemo.plasma', 'Plasma fresco (U)', { im: 'numeric' })}${inp('pre.hemo.crio', 'Crioprecipitado (U)', { im: 'numeric' })}</div>`)
+  + card('Conclusão', `${linha('UTI', chips('pre.uti', SN))}
+      <div class="grid g2">${inp('pre.outraEspecialidade', 'Avaliação de outra especialidade')}</div>
+      ${linha('Liberado para cirurgia', chips('pre.liberado', SN))}
+      <label class="f">Comentários sobre os achados<textarea data-f="pre.comentarios" rows="2"></textarea></label>`)
   + `</div></div>`;
 }
 
@@ -507,8 +663,7 @@ function abaTecnica() {
       ${calc.hemo ? `<p class="small">Hemoderivados: ${calc.hemo} ml (incluídos nos ganhos)</p>` : ''}`)
   + card('Encaminhamento', `${linha('Estado', chips('saida.estado', ['Acordado', 'Sonolento', 'Intubado', 'Óbito']))}
       ${linha('Destino', chips('saida.destino', ['RPA', 'Leito', 'UTI', 'Ambulatorial']))}`)
-  + card('Exames laboratoriais', `<div class="grid">${[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => inp(`labs.${i}`, '', { ph: 'ex.: Hb 12,5' })).join('')}</div>`)
-  + card('Anotações', `<textarea data-f="anotacoes" rows="5" placeholder="Observações livres (os eventos da linha do tempo já entram automaticamente)"></textarea>`)
+  + card('Exames laboratoriais (intraoperatório)', `<div class="grid">${[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => inp(`labs.${i}`, '', { ph: 'ex.: gaso, glicemia' })).join('')}</div>`)
   + `</div></div>`;
 }
 
@@ -521,7 +676,11 @@ function abaSrpa() {
       ${ALDRETE.map(([k, titulo, ops]) => `<div style="margin-top:10px"><div class="small muted">${titulo}</div>
         ${chips(`srpa.aldrete.${tk}.${k}`, [2, 1, 0].map((s) => [String(s), `${s} · ${ops[s]}`]))}</div>`).join('')}
     </details>`).join('');
-  return card('Admissão na SRPA', vit('adm'))
+  const an = S.f.anestesista;
+  return card('Médico responsável pela SRPA', `${chips('srpa.medicoOutro', [['Não', `O mesmo anestesista (${an.nome})`], ['Sim', 'Outro médico']])}
+      <div class="grid" style="margin-top:8px">${inp('srpa.medicoNome', 'Nome do médico da SRPA', { cls: 'span2' })}${inp('srpa.medicoCrm', 'CRM/UF', { ph: 'ex.: 12345/SP' })}</div>
+      <p class="small muted">Preencha nome e CRM só quando a SRPA ficar com outro médico.</p>`)
+  + card('Admissão na SRPA', vit('adm'))
   + `<h2 style="font-size:16px;color:var(--pri);margin:4px 2px 10px">Escala de Aldrete e Kroulik</h2>${ald}`
   + card('Prescrição médica', [0, 1, 2].map((i) => `<div class="grid" style="margin-bottom:8px">
       ${inp(`srpa.prescricao.${i}.item`, `${i + 1}. Item`, { cls: 'span2' })}${inp(`srpa.prescricao.${i}.quant`, 'Quant.')}${inp(`srpa.prescricao.${i}.horario`, 'Horário')}</div>`).join(''))
@@ -541,10 +700,14 @@ function abaIntra() {
     </section>
     ${lock ? '' : `<section class="card"><div class="acoes">
       <button class="btn pri" data-a="sv"><span class="ic">❤️</span>Sinais vitais</button>
-      <button class="btn" data-a="dr"><span class="ic">💉</span>Droga</button>
+      <button class="btn" data-a="dr"><span class="ic">💉</span>Droga (bolus)</button>
+      <button class="btn" data-a="in"><span class="ic">⏳</span>Infusão / Gás</button>
       <button class="btn" data-a="fl"><span class="ic">💧</span>Fluido / sangue</button>
       <button class="btn" data-a="eo"><span class="ic">📝</span>Evento</button>
     </div><div class="alerta-sv" id="ultsv"></div></section>`}
+    <section class="card" id="emcurso" hidden><h2>Infusões e gases em curso</h2><div class="tl" id="infs"></div></section>
+    <section class="card"><h2>Situações especiais / observações</h2>
+      <textarea data-f="anotacoes" rows="3" placeholder="Recebimento do paciente, alterações não planejadas, intercorrências…"></textarea></section>
     <section class="card"><h2>Gráfico</h2><div id="grafico"></div>
       <div class="leg"><span class="pas">PAS</span><span class="pad">PAD</span><span class="fc">FC</span></div></section>
     <section class="card"><h2>Linha do tempo</h2><div class="tl" id="tl"></div></section>`;
@@ -552,7 +715,7 @@ function abaIntra() {
 
 function iniciarIntra() {
   $$('[data-t]').forEach((b) => (b.onclick = () => marcarTempo(b.dataset.t)));
-  $$('[data-a]').forEach((b) => (b.onclick = () => ({ sv: dlgVitais, dr: dlgDroga, fl: dlgFluido, eo: dlgEvento })[b.dataset.a]()));
+  $$('[data-a]').forEach((b) => (b.onclick = () => ({ sv: dlgVitais, dr: dlgDroga, in: dlgInfusao, fl: dlgFluido, eo: dlgEvento })[b.dataset.a]()));
   desenharIntra();
   const tick = () => {
     const r = $('#relogio');
@@ -585,31 +748,178 @@ function iniciarIntra() {
 function desenharIntra() {
   const g = $('#grafico');
   g.innerHTML = svgGrafico(S.f, g.clientWidth);
+  desenharEmCurso();
   const f = S.f;
   const itens = [
     ...f.vitais.map((x) => ({ ...x, k: 'sv', txt: [x.pas || x.pad ? `PA ${x.pas || '–'}/${x.pad || '–'}` : '', x.fc ? `FC ${x.fc}` : '', x.spo2 ? `SpO₂ ${x.spo2}%` : '', x.etco2 ? `EtCO₂ ${x.etco2}` : '', x.temp ? `T ${num(x.temp)}°C` : '', x.ritmo].filter(Boolean).join(' · '), cat: 'Sinais vitais' })),
     ...f.drogas.map((x) => ({ ...x, k: 'dr', txt: `${x.nome} ${num(x.dose)} ${x.unid} ${x.via}`, cat: 'Droga' })),
     ...f.fluidos.map((x) => ({ ...x, k: 'fl', txt: `${x.nome} ${x.vol} ml`, cat: x.tipo })),
     ...f.eventos.map((x) => ({ ...x, k: 'eo', txt: x.texto, cat: 'Evento' })),
+    ...f.infusoes.flatMap((x) => [
+      ...x.etapas.map((e, i) => ({ id: x.id, t: e.t, k: 'in', cat: x.gas ? 'Gás' : x.tci ? 'Infusão TCI' : 'Infusão contínua',
+        txt: `${x.nome} ${i ? '→ ' : ''}${num(e.valor)} ${x.tci || x.unid}${i ? '' : ' (início)'}` })),
+      ...(x.fim ? [{ id: x.id, t: x.fim, k: 'in', cat: 'Fim de infusão', txt: `${x.nome} — parada${textoTotal(x)}` }] : []),
+    ]),
   ].sort((a, b) => (a.t > b.t ? -1 : 1));
   const lock = bloqueada();
   $('#tl').innerHTML = itens.map((i) => `<div class="ev ${i.k}"><span class="t">${hhmm(i.t)}</span>
       <span><span class="k">${esc(i.cat)}</span>${esc(i.txt)}</span>
       <span>${lock ? '' : `<button data-ed="${i.k}:${i.id}" aria-label="Editar">✏️</button><button data-del="${i.k}:${i.id}" aria-label="Excluir">🗑️</button>`}</span></div>`).join('')
     || '<p class="muted">Nada registrado ainda. Use os botões acima — o horário é preenchido automaticamente.</p>';
-  const col = { sv: 'vitais', dr: 'drogas', fl: 'fluidos', eo: 'eventos' };
+  const col = { sv: 'vitais', dr: 'drogas', fl: 'fluidos', eo: 'eventos', in: 'infusoes' };
   $$('[data-ed]').forEach((b) => (b.onclick = () => {
     const [k, id] = b.dataset.ed.split(':');
     const item = S.f[col[k]].find((x) => x.id === id);
-    ({ sv: dlgVitais, dr: dlgDroga, fl: dlgFluido, eo: dlgEvento })[k](item);
+    ({ sv: dlgVitais, dr: dlgDroga, fl: dlgFluido, eo: dlgEvento, in: dlgEditarInfusao })[k](item);
   }));
   $$('[data-del]').forEach((b) => (b.onclick = async () => {
     const [k, id] = b.dataset.del.split(':');
-    if (!(await confirmar('Excluir registro', 'Excluir este registro da linha do tempo?', 'Excluir', 'bad'))) return;
+    if (!(await confirmar('Excluir registro', k === 'in' ? 'Excluir esta infusão inteira (início, mudanças de dose e fim)?' : 'Excluir este registro da linha do tempo?', 'Excluir', 'bad'))) return;
     S.f[col[k]] = S.f[col[k]].filter((x) => x.id !== id);
     agendarSalvar();
     desenharIntra();
   }));
+}
+
+const textoTotal = (inf) => {
+  const t = totalInfusao(inf, S.f.pac.peso);
+  return t ? ` · total ${num(t.valor)} ${t.unid}` : '';
+};
+
+function desenharEmCurso() {
+  const box = $('#emcurso');
+  if (!box) return;
+  const ativas = S.f.infusoes.filter((x) => !x.fim);
+  box.hidden = !ativas.length;
+  const semPeso = !(+normNumero(S.f.pac.peso));
+  $('#infs').innerHTML = ativas.map((x) => {
+    const e = x.etapas.at(-1);
+    return `<div class="ev in"><span class="t">${hhmm(x.etapas[0].t)}</span>
+      <span><span class="k">${x.gas ? 'Gás' : x.tci ? 'TCI' : 'Infusão contínua'} · desde ${hhmm(x.etapas[0].t)}${x.etapas.length > 1 ? ` · dose atual desde ${hhmm(e.t)}` : ''}</span>
+      <b>${esc(x.nome)} ${num(e.valor)} ${esc(x.tci || x.unid)}</b>${esc(textoTotal(x))}
+      ${x.unid.includes('/kg/') && semPeso && !x.tci ? '<br><span class="small" style="color:var(--warn)">Informe o peso (aba Paciente) para calcular o total.</span>' : ''}</span>
+      <span class="inf-bts"><button class="btn" data-alt="${x.id}">Alterar</button><button class="btn bad" data-par="${x.id}">Parar</button></span></div>`;
+  }).join('');
+  $$('[data-alt]').forEach((b) => (b.onclick = () => dlgAlterarInfusao(S.f.infusoes.find((x) => x.id === b.dataset.alt))));
+  $$('[data-par]').forEach((b) => (b.onclick = () => dlgPararInfusao(S.f.infusoes.find((x) => x.id === b.dataset.par))));
+}
+
+async function dlgInfusao() {
+  const r = await modal({
+    title: 'Infusão contínua / gás',
+    body: `<input type="search" id="ibusca" placeholder="Buscar…" autocomplete="off">
+      <div class="small muted" style="margin-top:8px">Drogas</div><div class="chips favs" id="ifavs"></div>
+      <div class="small muted" style="margin-top:8px">Gases</div><div class="chips" id="igases"></div>
+      <div class="note small" id="ifaixa" style="margin-top:10px" hidden></div>
+      <input type="hidden" name="modo" value="Contínua">
+      <div class="chips" data-name="modo" style="margin:10px 0"><button data-v="Contínua">Contínua (dose)</button><button data-v="TCI">TCI (alvo)</button></div>
+      <div class="grid">
+        <label class="f span2">Droga / gás<input type="text" name="nome" required autocomplete="off"></label>
+        <label class="f"><span id="ilabel">Dose</span><input type="text" inputmode="decimal" name="valor" required autocomplete="off"></label>
+        <label class="f">Unidade<select name="unid"></select></label>
+        ${campoHora()}
+      </div>`,
+    ok: 'Iniciar',
+    onOpen: (d) => {
+      const fm = $('form', d);
+      let atual = null;
+      const unidades = () => {
+        const tci = fm.modo.value === 'TCI';
+        const ops = tci ? ['mcg/mL', 'ng/mL'] : UNID_INFUSAO;
+        const sel = tci ? (atual?.tci || 'mcg/mL') : (atual?.unid || 'mcg/kg/min');
+        fm.unid.innerHTML = ops.map((u) => `<option ${u === sel ? 'selected' : ''}>${u}</option>`).join('');
+        $('#ilabel', d).textContent = tci ? 'Alvo (Ce)' : 'Dose';
+        const fx = $('#ifaixa', d);
+        fx.hidden = !atual;
+        if (atual) fx.innerHTML = `Referência: <b>${esc(tci && atual.faixaTci ? atual.faixaTci : `${atual.faixa} ${atual.unid}`)}</b><br>Faixa usual de literatura — confira sempre a indicação e o paciente.`;
+      };
+      const desenhar = (q = '') => {
+        const n = q.toLowerCase();
+        const bt = (x) => `<button type="button" data-n="${esc(x.nome)}">${esc(x.nome)}</button>`;
+        $('#ifavs', d).innerHTML = INFUSOES.filter((x) => !x.gas && x.nome.toLowerCase().includes(n)).map(bt).join('');
+        $('#igases', d).innerHTML = INFUSOES.filter((x) => x.gas && x.nome.toLowerCase().includes(n)).map(bt).join('');
+        $$('[data-n]', d).forEach((b) => (b.onclick = () => {
+          atual = INFUSOES.find((x) => x.nome === b.dataset.n);
+          fm.nome.value = atual.nome;
+          if (!atual.tci && fm.modo.value === 'TCI') fm.modo.value = 'Contínua';
+          $$('.chips[data-name="modo"] button', d).forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.v === fm.modo.value)));
+          $$('[data-n]', d).forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+          unidades();
+          fm.valor.focus();
+        }));
+      };
+      desenhar();
+      $('#ibusca', d).oninput = (e) => desenhar(e.target.value);
+      fm.modo.addEventListener('input', unidades);
+      unidades();
+    },
+  });
+  if (r.v !== 'ok') return;
+  const d = r.data;
+  const cat = INFUSOES.find((x) => x.nome === d.nome.trim());
+  const tci = d.modo === 'TCI';
+  S.f.infusoes.push({
+    id: uid(), nome: d.nome.trim(), unid: tci ? (cat?.unid || 'mcg/kg/min') : d.unid, tci: tci ? d.unid : '',
+    gas: !!cat?.gas || ['L/min', '%'].includes(d.unid), etapas: [{ t: horaParaISO(d.hora), valor: normNum(d.valor) }],
+    fim: null, totalManual: '', totalUnid: '',
+  });
+  agendarSalvar();
+  desenharIntra();
+  toast(`${d.nome} iniciado: ${d.valor} ${d.unid}`);
+}
+
+async function dlgAlterarInfusao(inf) {
+  const r = await modal({
+    title: `Alterar ${esc(inf.nome)}`,
+    body: `<p class="small muted">Dose atual: <b>${num(inf.etapas.at(-1).valor)} ${esc(inf.tci || inf.unid)}</b></p>
+      <div class="grid"><label class="f">Nova ${inf.tci ? 'meta (alvo)' : 'dose'} (${esc(inf.tci || inf.unid)})<input type="text" inputmode="decimal" name="valor" required autofocus autocomplete="off"></label>
+      ${campoHora()}</div>`,
+  });
+  if (r.v !== 'ok') return;
+  const t = horaParaISO(r.data.hora);
+  const mesma = inf.etapas.find((e) => e.t === t);
+  if (mesma) mesma.valor = normNum(r.data.valor); // mesmo minuto: corrige a dose
+  else inf.etapas.push({ t, valor: normNum(r.data.valor) });
+  inf.etapas.sort((a, b) => (a.t > b.t) - (a.t < b.t));
+  agendarSalvar();
+  desenharIntra();
+}
+
+async function dlgPararInfusao(inf, horaPadrao) {
+  const pedeTotal = inf.tci;
+  const r = await modal({
+    title: `Parar ${esc(inf.nome)}`,
+    body: `<div class="grid">${campoHora(horaPadrao)}
+      ${pedeTotal ? `<label class="f">Total infundido (lido na bomba)<input type="text" inputmode="decimal" name="total" autocomplete="off"></label>
+      <label class="f">Unidade<select name="tunid">${['mg', 'mcg', 'mL'].map((u) => `<option>${u}</option>`).join('')}</select></label>` : ''}</div>`,
+    ok: 'Parar',
+  });
+  if (r.v !== 'ok') return false;
+  inf.fim = horaParaISO(r.data.hora);
+  if (pedeTotal) { inf.totalManual = normNum(r.data.total); inf.totalUnid = r.data.tunid; }
+  agendarSalvar();
+  desenharIntra();
+  return true;
+}
+
+async function dlgEditarInfusao(inf) {
+  const r = await modal({
+    title: `Editar ${esc(inf.nome)}`,
+    body: `<p class="small muted">${esc(inf.tci ? 'TCI — alvo em ' + inf.tci : inf.unid)}</p>
+      ${inf.etapas.map((e, i) => `<div class="grid"><label class="f">${i ? 'Mudança ' + i : 'Início'}<input type="time" name="h${i}" value="${hhmm(e.t)}" required></label>
+        <label class="f">${inf.tci ? 'Alvo' : 'Dose'}<input type="text" inputmode="decimal" name="v${i}" value="${esc(num(e.valor))}" required></label></div>`).join('')}
+      <div class="grid"><label class="f">Fim (vazio = em curso)<input type="time" name="fim" value="${inf.fim ? hhmm(inf.fim) : ''}"></label>
+      ${inf.tci || inf.totalManual ? `<label class="f">Total (bomba)<input type="text" inputmode="decimal" name="total" value="${esc(num(inf.totalManual))}"></label>
+        <label class="f">Unidade<select name="tunid">${['mg', 'mcg', 'mL'].map((u) => `<option ${u === inf.totalUnid ? 'selected' : ''}>${u}</option>`).join('')}</select></label>` : ''}</div>`,
+  });
+  if (r.v !== 'ok') return;
+  const d = r.data;
+  inf.etapas = inf.etapas.map((_, i) => ({ t: horaParaISO(d[`h${i}`], new Date(inf.etapas[0].t)), valor: normNum(d[`v${i}`]) }))
+    .sort((a, b) => (a.t > b.t) - (a.t < b.t));
+  inf.fim = d.fim ? horaParaISO(d.fim, new Date(inf.etapas[0].t)) : null;
+  if ('total' in d) { inf.totalManual = normNum(d.total); inf.totalUnid = d.tunid; }
+  agendarSalvar();
+  desenharIntra();
 }
 
 function svgGrafico(f, largura = 720) {
@@ -670,11 +980,21 @@ async function marcarTempo(k) {
     else return;
   }
   await salvarAgora();
-  if (k === 'fimAnest' && S.f.tempos.fimAnest && obrigatoriosFaltando(S.f).length) await dlgObrigatorios();
+  if (k === 'fimAnest' && S.f.tempos.fimAnest) {
+    const ativas = S.f.infusoes.filter((x) => !x.fim);
+    if (ativas.length && await confirmar('Infusões em curso', `Parar ${ativas.map((x) => x.nome).join(', ')} às ${hhmm(S.f.tempos.fimAnest)}?`, 'Parar todas')) {
+      for (const x of ativas) {
+        if (x.tci) await dlgPararInfusao(x, S.f.tempos.fimAnest);
+        else x.fim = S.f.tempos.fimAnest;
+      }
+      await salvarAgora();
+    }
+    if (obrigatoriosFaltando(S.f).length) await dlgObrigatorios();
+  }
   telaFicha();
 }
 
-const campoHora = (t) => `<label class="f">Horário<input type="time" name="hora" value="${t ? hhmm(t) : agoraHM()}" required></label>`;
+const campoHora = (t) => /* t: ISO opcional */ `<label class="f">Horário<input type="time" name="hora" value="${t ? hhmm(t) : agoraHM()}" required></label>`;
 
 function salvarItem(colecao, item, dados) {
   const lista = S.f[colecao];
@@ -861,6 +1181,7 @@ function ligarFim() {
   $('#bdel')?.addEventListener('click', async () => {
     if (!(await confirmar('Excluir rascunho', 'Excluir definitivamente esta ficha em andamento?', 'Excluir', 'bad'))) return;
     await store.excluirFicha(f.id);
+    sincronizarExclusao(f.id);
     S.fichas = S.fichas.filter((x) => x.id !== f.id);
     S.f = null;
     go('#/lista');
@@ -905,7 +1226,7 @@ const SECOES = {
   pac: 'Paciente', pre: 'Pré-anestésica', tempos: 'Tempos', vitais: 'Sinais vitais', drogas: 'Drogas',
   fluidos: 'Fluidos', eventos: 'Eventos', monit: 'Monitorização', equip: 'Equipamentos', labs: 'Exames',
   acesso: 'Acesso venoso', anest: 'Anestesia', vent: 'Ventilação', balanco: 'Balanço hídrico',
-  saida: 'Encaminhamento', anotacoes: 'Anotações', srpa: 'SRPA',
+  saida: 'Encaminhamento', anotacoes: 'Situações especiais', srpa: 'SRPA', infusoes: 'Infusões',
 };
 const rotuloCaminho = (k) => {
   const [s, ...resto] = k.split('.');
@@ -1054,7 +1375,7 @@ function telaConfig() {
       <label class="f">UF<input type="text" name="uf" value="${esc(u.uf)}" maxlength="2" required></label>
       <div class="full"><button class="btn pri">Salvar dados</button></div></form>
       <p class="small muted">Vale para as próximas fichas. As já criadas mantêm o nome e CRM de quando foram feitas.</p>`)
-    + (NATIVO ? cardArmazenamento() : '')
+    + (NATIVO ? cardArmazenamento() + cardSync() : '')
     + card('Senha', `<div class="btns"><button class="btn" id="bsenha">Trocar senha</button></div>`)
     + card('Backup', `<p class="small">O backup contém suas fichas <b>criptografadas</b>: só abre com a sua senha ou o código de recuperação.
         No Android, “Compartilhar backup” permite enviar direto para o <b>Google Drive</b> ou <b>OneDrive</b>.</p>
@@ -1106,7 +1427,7 @@ function telaConfig() {
   $('#bbk').onclick = () => backup('share');
   $('#bbkd').onclick = () => backup('baixar');
   $('#brest').onclick = () => restaurarBackup();
-  if (NATIVO) ligarArmazenamento();
+  if (NATIVO) { ligarArmazenamento(); ligarSync(); }
   const salvarFavs = async (lista) => { u.favoritos = lista; await store.salvarUsuario(); telaConfig(); };
   const editarFav = async (i) => {
     const x = i >= 0 ? favs[i] : { nome: '', unid: 'mg', via: 'IV', dose: '', amp: '' };
@@ -1131,6 +1452,64 @@ function telaConfig() {
   $('#bfadd').onclick = () => editarFav(-1);
   $('#bfreset').onclick = async () => { if (await confirmar('Lista padrão', 'Substituir seus favoritos pela lista padrão?')) salvarFavs(null); };
   $('#bsair').onclick = () => { store.sair(); S.fichas = []; go('#/'); };
+}
+
+function cardSync() {
+  const st = store.usuarioAtual() ? estadoSync() : {};
+  return card('Sincronização entre aparelhos', syncAtivo() ? `
+    <p class="small">As fichas (criptografadas) ficam também em <b>${esc(armazenamento().nome)}/Dados</b>. Se essa pasta for sincronizada
+      com a nuvem (ex.: DriveSync) nos dois aparelhos, cada um recebe as fichas do outro. Use o <b>mesmo cadastro</b> nos dois.</p>
+    <p class="small muted">Última sincronização: ${st.ultima ? dataHoraBR(st.ultima) : 'ainda não'}</p>
+    <div class="btns"><button class="btn pri" id="bsyncnow">🔄 Sincronizar agora</button>
+      <button class="btn" id="badotar">👥 Usar cadastro de outro aparelho</button></div>`
+    : '<p class="small muted">Escolha uma pasta acima, com “Salvar automaticamente na pasta”, para ativar a sincronização.</p>');
+}
+
+function ligarSync() {
+  $('#bsyncnow')?.addEventListener('click', async () => { await sincronizar({ silencioso: false }); telaConfig(); });
+  $('#badotar')?.addEventListener('click', () => adotarCadastro());
+}
+
+// Usa neste aparelho o cadastro criado no outro (mesma chave = mesmas fichas) e traz para ele
+// as fichas do cadastro atual deste aparelho.
+async function adotarCadastro() {
+  const atual = store.usuarioAtual();
+  let candidatos = [];
+  try {
+    const { arquivos } = await Arquivos.listarArquivos({ pasta: armazenamento().uri, subpasta: SUB_DADOS });
+    for (const a of arquivos.filter((x) => /^usuario-.+\.json$/.test(x.nome))) {
+      const d = await lerJSON(a.nome);
+      if (d?.user?.id && d.user.id !== atual.id) candidatos.push(d.user);
+    }
+  } catch (e) { return toast('Não foi possível ler a pasta: ' + e.message, 5000); }
+  if (!candidatos.length) {
+    return modal({ title: 'Nenhum outro cadastro encontrado', ok: 'Entendi', cancel: '',
+      body: `<p>Ainda não há cadastro de outro aparelho em <b>${esc(armazenamento().nome)}/Dados</b>.</p>
+        <p class="small">No outro aparelho: escolha a pasta sincronizada em Configurações e toque em “Sincronizar agora”. Espere o DriveSync copiar os arquivos e tente de novo aqui.</p>` });
+  }
+  const r = await modal({
+    title: 'Usar cadastro de outro aparelho',
+    body: `<p class="small">Escolha o cadastro e digite a <b>senha dele</b>. As ${S.fichas.length} ficha(s) do cadastro atual deste aparelho
+        (<b>${esc(atual.nome)}</b>) serão transferidas para ele, e o cadastro atual será removido daqui.</p>
+      <input type="hidden" name="uid" value="${esc(candidatos[0].id)}">
+      <div class="chips" data-name="uid" style="margin:8px 0">${candidatos.map((u) => `<button data-v="${esc(u.id)}">${esc(nomeUser(u))}</button>`).join('')}</div>
+      <label class="f">Senha desse cadastro<input type="password" name="senha" required autocomplete="current-password"></label>`,
+    ok: 'Usar este cadastro',
+  });
+  if (r.v !== 'ok') return;
+  const novo = candidatos.find((u) => u.id === r.data.uid);
+  try {
+    await store.adotarUsuario(novo, r.data.senha);
+    const fichasAntigas = (await store.listarFichas()).map((f) => ({ ...f }));
+    const dadosDoAparelho = { armazenamento: atual.armazenamento, ultimoBackup: atual.ultimoBackup };
+    await store.login(novo.id, r.data.senha);
+    await store.unificarCadastro(fichasAntigas, atual.id, dadosDoAparelho);
+    try { localStorage.removeItem('sync:' + atual.id); } catch { /* ok */ }
+    S.fichas = (await store.listarFichas()).map(normalizarFicha);
+    toast(`Agora usando o cadastro de ${novo.nome}. ${fichasAntigas.length} ficha(s) transferida(s).`, 5000);
+    await sincronizar({ silencioso: false });
+    go('#/lista');
+  } catch (e) { toast(e.message, 5000); }
 }
 
 function cardArmazenamento() {
@@ -1179,14 +1558,17 @@ function restaurarBackup() {
       const data = JSON.parse(await i.files[0].text());
       const r = await store.importarBackup(data);
       toast(`Backup de ${r.nome}: ${r.fichas} ficha(s) restaurada(s)${r.usuarioNovo ? ' — entre com a senha desse usuário' : ''}`, 5000);
-      if (store.usuarioAtual()) { S.fichas = await store.listarFichas(); go('#/lista'); } else telaLogin();
+      if (store.usuarioAtual()) { S.fichas = (await store.listarFichas()).map(normalizarFicha); go('#/lista'); } else telaLogin();
     } catch (e) { toast('Não foi possível restaurar: ' + e.message, 5000); }
   };
   i.click();
 }
 
 // ---------------------------------------------------------------- início
-window.addEventListener('visibilitychange', () => { if (document.hidden) salvarAgora(); });
+window.addEventListener('visibilitychange', () => {
+  if (document.hidden) { salvarAgora().then(() => syncAtivo() && store.usuarioAtual() && sincronizar()); }
+  else if (store.usuarioAtual()) sincronizarDeVezEmQuando();
+});
 window.addEventListener('pagehide', () => salvarAgora());
 if (!NATIVO && 'serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});

@@ -1,6 +1,6 @@
 // Modelo de dados da ficha, catálogos e utilidades de tempo.
 
-export const N_MEDICAMENTOS = 12;
+export const N_MEDICAMENTOS = 7;
 
 export const VIAS = ['IV', 'IM', 'SC', 'IT', 'PD', 'VO', 'Inal', 'Tóp', 'Perineural'];
 export const UNIDADES = ['mg', 'mcg', 'g', 'ml', 'UI', '%', 'mEq'];
@@ -66,17 +66,58 @@ export const EQUIPAMENTOS = [
 
 // Avaliação pré-anestésica: [chave, título, itens, tem campo "outro"]
 export const PRE_GRUPOS = [
-  ['cardio', 'Cardiocirculatório', [['has', 'Hipertensão Arterial'], ['angina', 'Angina / Coronariopatia'], ['arritmia', 'Arritmia']], true],
-  ['renal', 'Renal', [['drc', 'Doença Renal Crônica'], ['ira', 'Insuficiência Renal Aguda']], true],
-  ['infeccioso', 'Infeccioso', [['hiv', 'HIV'], ['hepatite', 'Hepatite']], true],
-  ['respiratorio', 'Respiratório', [['asma', 'Asma / Bronquite'], ['dpoc', 'DPOC']], true],
-  ['musculo', 'Músculo Esquelético', [['lombar', 'Dor Lombar']], true],
-  ['gastro', 'Gastrointestinal', [['refluxo', 'Refluxo Gastresofágico'], ['hiato', 'Hérnia de Hiato'], ['obstrucao', 'Obstrução Intestinal']], true],
-  ['endocrino', 'Endócrino', [['diabetes', 'Diabetes'], ['obesidade', 'Obesidade']], true],
-  ['neuro', 'Neurológico', [['convulsoes', 'Convulsões'], ['lesaoMedular', 'Lesão Medular'], ['fraqueza', 'Fraqueza Muscular'], ['parestesias', 'Parestesias']], true],
-  ['hemato', 'Hematológico', [['anemia', 'Anemia'], ['coagulopatia', 'Coagulopatia'], ['hemotransfusao', 'Hemotransfusão Prévia']], true],
-  ['habitos', 'Hábitos Sociais', [['tabaco', 'Tabaco'], ['alcool', 'Álcool'], ['drogas', 'Drogas']], true],
+  ['cardio', 'Cardiocirculatório', [['has', 'Hipertensão'], ['angina', 'Angina / Coronariopatia'], ['iam', 'Infarto do miocárdio'],
+    ['ic', 'Insuf. cardíaca'], ['valvulopatia', 'Valvulopatia'], ['arritmia', 'Arritmia'], ['angioplastia', 'Angioplastia']], true],
+  ['respiratorio', 'Respiratório', [['asma', 'Asma / Bronquite'], ['dpoc', 'DPOC'], ['apneia', 'Apneia do sono'], ['ivas', 'IVAS recente'],
+    ['o2', 'Dependência de O₂'], ['expectoracao', 'Expectoração'], ['tuberculose', 'Tuberculose']], true],
+  ['gastro', 'Gastrointestinal/Hepático', [['refluxo', 'Refluxo gastroesofágico'], ['hiato', 'Hérnia de hiato'], ['obstrucao', 'Obstrução intestinal'],
+    ['ulcera', 'Úlcera péptica'], ['vomito', 'Vômito / diarreia'], ['gastrite', 'Gastrite'], ['hepatite', 'Hepatite'], ['ictericia', 'Icterícia'], ['cirrose', 'Cirrose']], true],
+  ['neuro', 'Neurológico', [['convulsoes', 'Convulsões'], ['avc', 'AVC'], ['cefaleia', 'Cefaleia'], ['lesaoMedular', 'Lesão medular'],
+    ['fraqueza', 'Dormência / fraqueza'], ['parestesias', 'Parestesias']], true],
+  ['renal', 'Renal', [['drc', 'Doença renal crônica'], ['ira', 'Insuf. renal aguda'], ['dialise', 'Diálise']], true],
+  ['endocrino', 'Endócrino', [['diabetes', 'Diabetes'], ['obesidade', 'Obesidade'], ['tireoide', 'Patologia da tireoide']], true],
+  ['infeccioso', 'Infeccioso', [['hiv', 'HIV'], ['hepatite', 'Hepatite viral']], true],
+  ['habitos', 'Hábitos sociais', [['tabaco', 'Tabaco'], ['alcool', 'Álcool'], ['drogas', 'Drogas']], true],
 ];
+// Grupos retirados da ficha (dados antigos vão para "Outros")
+export const PRE_GRUPOS_ANTIGOS = [
+  ['musculo', 'Músculo esquelético', [['lombar', 'Dor lombar']]],
+  ['hemato', 'Hematológico', [['anemia', 'Anemia'], ['coagulopatia', 'Coagulopatia'], ['hemotransfusao', 'Hemotransfusão prévia']]],
+];
+
+// Infusões contínuas e gases. faixa = referência (Miller's Anesthesia, Stoelting, Barash; consensos usuais).
+// unid: unidade da dose; tci: unidade do alvo quando usado em TCI.
+export const INFUSOES = [
+  { nome: 'Propofol', unid: 'mcg/kg/min', faixa: 'sedação 25–75 · anestesia 100–200', tci: 'mcg/mL', faixaTci: '2–6 mcg/mL (sedação 0,5–2)' },
+  { nome: 'Remifentanil', unid: 'mcg/kg/min', faixa: '0,05–0,5 (sedação 0,025–0,1)', tci: 'ng/mL', faixaTci: '2–8 ng/mL' },
+  { nome: 'Sufentanil', unid: 'mcg/kg/h', faixa: '0,1–0,5', tci: 'ng/mL', faixaTci: '0,1–0,5 ng/mL' },
+  { nome: 'Fentanil', unid: 'mcg/kg/h', faixa: '0,5–3' },
+  { nome: 'Dexmedetomidina', unid: 'mcg/kg/h', faixa: '0,2–0,7 (até 1,4)' },
+  { nome: 'Cetamina', unid: 'mg/kg/h', faixa: 'analgesia 0,1–0,3' },
+  { nome: 'Lidocaína', unid: 'mg/kg/h', faixa: '1–2' },
+  { nome: 'Sulfato de magnésio', unid: 'mg/kg/h', faixa: '10–20' },
+  { nome: 'Noradrenalina', unid: 'mcg/kg/min', faixa: '0,01–0,5' },
+  { nome: 'Adrenalina', unid: 'mcg/kg/min', faixa: '0,01–0,5' },
+  { nome: 'Dobutamina', unid: 'mcg/kg/min', faixa: '2–20' },
+  { nome: 'Dopamina', unid: 'mcg/kg/min', faixa: '2–20 (1–5 dopa · 5–10 β · >10 α)' },
+  { nome: 'Fenilefrina', unid: 'mcg/kg/min', faixa: '0,1–1' },
+  { nome: 'Vasopressina', unid: 'UI/min', faixa: '0,01–0,04' },
+  { nome: 'Nitroglicerina', unid: 'mcg/kg/min', faixa: '0,5–5' },
+  { nome: 'Nitroprussiato', unid: 'mcg/kg/min', faixa: '0,3–3 (evitar >2 prolongado)' },
+  { nome: 'Esmolol', unid: 'mcg/kg/min', faixa: '50–300' },
+  { nome: 'Milrinona', unid: 'mcg/kg/min', faixa: '0,375–0,75' },
+  { nome: 'Ocitocina', unid: 'UI/h', faixa: '2,5–10' },
+  { nome: 'Rocurônio', unid: 'mg/kg/h', faixa: '0,3–0,6' },
+  { nome: 'Cisatracúrio', unid: 'mcg/kg/min', faixa: '1–2' },
+  { nome: 'Insulina regular', unid: 'UI/h', faixa: 'conforme glicemia' },
+  { nome: 'O₂', unid: 'L/min', faixa: 'conforme fluxo', gas: true },
+  { nome: 'Ar comprimido', unid: 'L/min', faixa: 'conforme fluxo', gas: true },
+  { nome: 'N₂O', unid: 'L/min', faixa: 'conforme fluxo', gas: true },
+  { nome: 'Sevoflurano', unid: '%', faixa: '0,5–3 (CAM ≈ 2)', gas: true },
+  { nome: 'Desflurano', unid: '%', faixa: '3–8 (CAM ≈ 6)', gas: true },
+  { nome: 'Isoflurano', unid: '%', faixa: '0,5–1,5 (CAM ≈ 1,15)', gas: true },
+];
+export const UNID_INFUSAO = ['mcg/kg/min', 'mcg/kg/h', 'mg/kg/h', 'mg/h', 'mcg/min', 'UI/min', 'UI/h', 'mL/h', 'L/min', '%'];
 
 export const ALDRETE = [
   ['atividade', 'Atividade muscular', ['Incapaz de mover nenhum membro', 'Move 2 membros (voluntário/comando)', 'Move 4 membros (voluntário/comando)']],
@@ -130,6 +171,25 @@ export function horaParaISO(hm, ref = new Date()) {
   return best.toISOString();
 }
 
+function novaPre() {
+  return {
+    dataAval: hojeISO(), horaAval: '',
+    diagnostico: '', procedimento: '',
+    pa: '', fc: '', temp: '', fr: '', jejumSolidos: '', jejumLiquidos: '', dor: '', dorEscala: 'Adulto',
+    negativos: {}, itens: {}, outros: {}, outrosGeral: '', toleranciaExercicio: '',
+    diabetesTipo: '', cigarros: '', cancer: '', cancerLocal: '', qt: false, rt: false,
+    gravidez: '', igSemanas: '', dum: '', nvpo: '', histFamiliar: '',
+    alergiaNeg: false, alergias: [{ agente: '', reacao: '' }, { agente: '', reacao: '' }, { agente: '', reacao: '' }],
+    previaNeg: false, previas: [{ cirurgia: '', anestesia: '', dados: '' }, { cirurgia: '', anestesia: '', dados: '' }, { cirurgia: '', anestesia: '', dados: '' }],
+    medicamentos: Array.from({ length: N_MEDICAMENTOS }, () => ({ nome: '', dose: '', ult24: '' })),
+    vad: '', pescoco: '', protrusao: '', flexao: '', previsaoVad: '', mallampati: '', viaOutros: '',
+    exame: { cardiaco: '', resp: '', neuro: '', regional: '', outro: '' },
+    examesPre: ['', '', '', '', '', ''],
+    asa: '', emergencia: '', reservaSangue: '', hemo: { ch: '', plaq: '', plasma: '', crio: '' },
+    tecProposta: '', tecAlternativa: '', uti: '', outraEspecialidade: '', liberado: '', comentarios: '',
+  };
+}
+
 export function novaFicha(user) {
   return {
     id: uid(),
@@ -143,13 +203,14 @@ export function novaFicha(user) {
     anestesista: { nome: user.nome, crm: user.crm, uf: user.uf },
     pac: {
       nome: '', idade: '', data: hojeISO(), sexo: '', convenio: '', matricula: '', carater: '',
-      peso: '', jejum: '', cirurgiao: '', cirurgiaoCrm: '', aux1: '', aux2: '', intervencoes: ['', '', '', '', ''],
+      peso: '', altura: '', nascimento: '', jejum: '', cirurgiao: '', cirurgiaoCrm: '', aux1: '', aux2: '', intervencoes: ['', '', '', '', ''],
     },
     tempos: { inicioAnest: null, inicioCir: null, fimCir: null, fimAnest: null },
     vitais: [], // {id, t, pas, pad, fc, spo2, etco2, temp, ritmo}
     drogas: [], // {id, t, nome, dose, unid, via}
     fluidos: [], // {id, t, nome, tipo, vol}
     eventos: [], // {id, t, texto}
+    infusoes: [], // {id, nome, unid, tci, gas, etapas:[{t, valor}], fim, totalManual}
     monit: {}, equip: {}, labs: ['', '', '', '', '', '', '', '', ''],
     acesso: { perifNum: '', local: '', centralVia: '', interc: '', mpa: '' },
     anest: {
@@ -165,18 +226,14 @@ export function novaFicha(user) {
     balanco: { diurese: '', cristaloide: '', coloide: '', perdas: '', ganhos: '' },
     saida: { estado: '', destino: '' },
     anotacoes: '',
-    pre: {
-      diagnostico: '', procedimento: '', itens: {}, outros: {}, diabetesTipo: '', cigarros: '',
-      cancerLocal: '', qt: false, rt: false, alergias: ['', '', ''], previas: ['', '', ''],
-      medicamentos: Array(N_MEDICAMENTOS).fill(''), gravidez: '', dum: '', nvpo: '', histFamiliar: '',
-      asa: '', emergencia: '', reservaSangue: '', mallampati: '', vad: '',
-    },
+    pre: novaPre(),
     srpa: {
       admHora: '', admPas: '', admPad: '', admFc: '', admSpo2: '',
       aldrete: {}, // aldrete[tempo][criterio] = 0|1|2
       prescricao: [{ item: '', quant: '', horario: '' }, { item: '', quant: '', horario: '' }, { item: '', quant: '', horario: '' }],
       intercorrencias: '',
       altaHora: '', altaPas: '', altaPad: '', altaFc: '', altaSpo2: '', encaminhado: '',
+      medicoOutro: '', medicoNome: '', medicoCrm: '', // médico da SRPA quando não é o anestesista
     },
   };
 }
@@ -219,10 +276,73 @@ export function num(v) {
   return String(v ?? '').replace('.', ',');
 }
 
+export function imc(f) {
+  const p = +normNumero(f.pac.peso), a = +normNumero(f.pac.altura) / 100;
+  if (!p || !a) return '';
+  return Math.round((p / (a * a)) * 10) / 10;
+}
+
+export function normNumero(v) {
+  return String(v ?? '').trim().replace(',', '.');
+}
+
+// Dose total de uma infusão contínua (soma de cada etapa: dose × peso × tempo).
+// Retorna { valor, unid } ou null quando não se aplica (gases, TCI sem total informado).
+export function totalInfusao(inf, peso, agora = Date.now()) {
+  if (inf.tci || inf.gas) {
+    if (inf.totalManual) return { valor: inf.totalManual, unid: inf.totalUnid || 'mg', manual: true };
+    return null;
+  }
+  const fim = inf.fim ? +new Date(inf.fim) : agora;
+  const kg = +normNumero(peso) || 0;
+  const u = inf.unid;
+  const porKg = u.includes('/kg/');
+  if (porKg && !kg) return null;
+  let soma = 0;
+  inf.etapas.forEach((e, i) => {
+    const ini = +new Date(e.t);
+    const ate = i + 1 < inf.etapas.length ? +new Date(inf.etapas[i + 1].t) : fim;
+    const min = Math.max(0, (ate - ini) / 60000);
+    const v = +normNumero(e.valor) || 0;
+    const tempo = u.endsWith('/min') ? min : min / 60;
+    soma += v * tempo * (porKg ? kg : 1);
+  });
+  let unid = u.split('/')[0]; // mcg, mg, UI, mL
+  if (unid === 'mcg' && soma >= 1000) { soma /= 1000; unid = 'mg'; }
+  return { valor: Math.round(soma * 100) / 100, unid };
+}
+
+export const rotuloInfusao = (inf) => `${inf.nome} (${inf.tci ? 'TCI ' + inf.tci : inf.unid})`;
+
 // Completa fichas criadas em versões anteriores do app com os campos novos.
 export function normalizarFicha(f) {
   f.pac.cirurgiaoCrm ??= '';
-  while (f.pre.medicamentos.length < N_MEDICAMENTOS) f.pre.medicamentos.push('');
+  f.pac.altura ??= '';
+  f.pac.nascimento ??= '';
+  f.infusoes ??= [];
+  f.srpa.medicoOutro ??= ''; f.srpa.medicoNome ??= ''; f.srpa.medicoCrm ??= '';
+  const p = f.pre;
+  const base = novaPre();
+  for (const k of Object.keys(base)) if (p[k] === undefined) p[k] = base[k];
+  if (p.dataAval === base.dataAval && f.pac.data) p.dataAval = f.pac.data;
+  // alergias / cirurgias prévias eram linhas de texto
+  p.alergias = p.alergias.map((a) => (typeof a === 'string' ? { agente: a, reacao: '' } : a));
+  p.previas = p.previas.map((a) => (typeof a === 'string' ? { cirurgia: a, anestesia: '', dados: '' } : a));
+  // medicamentos: eram até 12 linhas de texto; agora 7 linhas com dose e uso nas últimas 24 h
+  if (p.medicamentos.some((m) => typeof m === 'string')) {
+    const txt = p.medicamentos.map((m) => (typeof m === 'string' ? m : m.nome)).filter(Boolean);
+    const linhas = txt.slice(0, N_MEDICAMENTOS - 1);
+    if (txt.length >= N_MEDICAMENTOS) linhas.push(txt.slice(N_MEDICAMENTOS - 1).join('; '));
+    p.medicamentos = linhas.map((nome) => ({ nome, dose: '', ult24: '' }));
+  }
+  while (p.medicamentos.length < N_MEDICAMENTOS) p.medicamentos.push({ nome: '', dose: '', ult24: '' });
+  // hematológico / músculo esquelético foram retirados: o que estava marcado vai para "Outros"
+  const antigos = [];
+  for (const [k, , itens] of PRE_GRUPOS_ANTIGOS) {
+    for (const [ik, il] of itens) if (p.itens[`${k}_${ik}`]) { antigos.push(il); delete p.itens[`${k}_${ik}`]; }
+    if (p.outros[k]) { antigos.push(p.outros[k]); delete p.outros[k]; }
+  }
+  if (antigos.length) p.outrosGeral = [p.outrosGeral, antigos.join(', ')].filter(Boolean).join('; ');
   return f;
 }
 

@@ -166,7 +166,7 @@ export async function gerarBackup() {
   const fichas = await tx('fichas', 'readonly', (s) => s.index('userId').getAll(sessao.user.id));
   return {
     app: 'ficha-anestesia', formato: 1, exportadoEm: new Date().toISOString(),
-    user: sessao.user, fichas,
+    user: usuarioParaPasta().user, fichas,
   };
 }
 
@@ -185,4 +185,60 @@ export async function importarBackup(data) {
     }
   }
   return { usuarioNovo: !existente, nome: data.user.nome, fichas: novas };
+}
+
+// ---------------------------------------------------------------- sincronização entre aparelhos
+// Campos do cadastro que pertencem ao aparelho (não vão para a pasta compartilhada).
+const CAMPOS_DO_APARELHO = ['armazenamento', 'ultimoBackup'];
+
+// Cadastro sem dados do aparelho: só identidade, chaves embrulhadas pela senha/código e favoritos.
+export function usuarioParaPasta() {
+  const u = { ...sessao.user };
+  for (const k of CAMPOS_DO_APARELHO) delete u[k];
+  return { app: 'ficha-anestesia', tipo: 'usuario', user: u };
+}
+
+// Registros ainda cifrados do usuário da sessão (o que vai para a pasta).
+export async function registrosDoUsuario() {
+  return tx('fichas', 'readonly', (s) => s.index('userId').getAll(sessao.user.id));
+}
+
+// Recebe um registro cifrado vindo da pasta. Vale o mais recente.
+// rec.excluida = rascunho apagado no outro aparelho.
+export async function importarRegistro(rec) {
+  if (!rec?.id || rec.userId !== sessao.user.id) return false;
+  const cur = await tx('fichas', 'readonly', (s) => s.get(rec.id));
+  if (cur && cur.atualizadaEm >= rec.atualizadaEm) return false;
+  if (rec.excluida) {
+    if (!cur) return false;
+    await tx('fichas', 'readwrite', (s) => s.delete(rec.id));
+    return true;
+  }
+  await tx('fichas', 'readwrite', (s) => s.put({ id: rec.id, userId: rec.userId, atualizadaEm: rec.atualizadaEm, iv: rec.iv, ct: rec.ct }));
+  return true;
+}
+
+// Cadastro de outro aparelho: confere a senha e o guarda neste aparelho (sem abrir a sessão).
+export async function adotarUsuario(userPasta, senha) {
+  try { await unwrap(userPasta.wPass, senha); } catch { throw new Error('Senha incorreta para esse cadastro'); }
+  const existente = await tx('users', 'readonly', (s) => s.get(userPasta.id));
+  const u = { ...(existente || {}), ...userPasta };
+  for (const k of CAMPOS_DO_APARELHO) if (existente?.[k] !== undefined) u[k] = existente[k]; else delete u[k];
+  await tx('users', 'readwrite', (s) => s.put(u));
+  return u;
+}
+
+// Unificação: move as fichas (já decifradas) do cadastro antigo para o cadastro da sessão atual,
+// cifrando com a chave nova, e remove o cadastro antigo deste aparelho.
+export async function unificarCadastro(fichasAntigas, idAntigo, dadosDoAparelho) {
+  for (const f of fichasAntigas) {
+    f.userId = sessao.user.id;
+    const c = await cifrar(f);
+    await tx('fichas', 'readwrite', (s) => s.put({ id: f.id, userId: f.userId, atualizadaEm: f.atualizadaEm, ...c }));
+  }
+  const velhos = await tx('fichas', 'readonly', (s) => s.index('userId').getAll(idAntigo));
+  for (const r of velhos) await tx('fichas', 'readwrite', (s) => s.delete(r.id));
+  await tx('users', 'readwrite', (s) => s.delete(idAntigo));
+  Object.assign(sessao.user, dadosDoAparelho);
+  await salvarUsuario();
 }
