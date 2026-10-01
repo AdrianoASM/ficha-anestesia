@@ -205,10 +205,15 @@ export async function registrosDoUsuario() {
 
 // Recebe um registro cifrado vindo da pasta. Vale o mais recente.
 // rec.excluida = rascunho apagado no outro aparelho.
-export async function importarRegistro(rec) {
+export async function importarRegistro(rec, { conferir = false } = {}) {
   if (!rec?.id || rec.userId !== sessao.user.id) return false;
   const cur = await tx('fichas', 'readonly', (s) => s.get(rec.id));
-  if (cur && cur.atualizadaEm >= rec.atualizadaEm) return false;
+  let substituir = !cur || cur.atualizadaEm < rec.atualizadaEm;
+  // na sincronização completa: se a cópia local não abre com a chave atual, troca pela da pasta
+  if (!substituir && conferir && !rec.excluida) {
+    try { await decifrar(cur); } catch { try { await decifrar(rec); substituir = true; } catch { /* nenhuma abre */ } }
+  }
+  if (!substituir) return false;
   if (rec.excluida) {
     if (!cur) return false;
     await tx('fichas', 'readwrite', (s) => s.delete(rec.id));

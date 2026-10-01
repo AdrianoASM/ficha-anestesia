@@ -11,7 +11,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const APP_VERSAO = '1.1.2';
+const APP_VERSAO = '1.1.3';
 const DESENVOLVEDOR = 'Adriano A S Mendonça';
 
 // Rodando dentro do APK Android (Capacitor)?
@@ -347,7 +347,7 @@ const mesmoAnestesista = (a, b) => soDigitos(a.crm) && soDigitos(a.crm) === soDi
 const maisAntigo = (a, b) => (a.criadoEm || '') < (b.criadoEm || '') || ((a.criadoEm || '') === (b.criadoEm || '') && a.id < b.id);
 
 let sincronizando = null;
-async function sincronizar({ silencioso = true } = {}) {
+async function sincronizar({ silencioso = true, completa = false } = {}) {
   if (!syncAtivo()) { if (!silencioso) toast('Escolha uma pasta (Configurações) para sincronizar.'); return; }
   if (sincronizando) return sincronizando;
   sincronizando = (async () => {
@@ -358,7 +358,10 @@ async function sincronizar({ silencioso = true } = {}) {
       await gravarJSON(`usuario-${u.id}.json`, store.usuarioParaPasta());
       const { arquivos } = await Arquivos.listarArquivos({ pasta: armazenamento().uri, subpasta: SUB_DADOS });
       // pasta trocada: recomeça (lê e envia tudo de novo)
-      if (st.pasta !== armazenamento().uri) { st.pasta = armazenamento().uri; st.lidos = {}; st.enviados = {}; }
+      if (st.pasta !== armazenamento().uri) { st.pasta = armazenamento().uri; st.lidos = {}; st.enviados = {}; st.conteudo = {}; }
+      // sincronização completa (botão 🔄): relê tudo, sem confiar no que já foi lido
+      if (completa) st.lidos = {};
+      st.conteudo ||= {};
       const naPasta = new Set(arquivos.map((a) => a.nome));
       st.nFichas = arquivos.filter((a) => /^ficha-.+\.json$/.test(a.nome)).length;
       const outros = await cadastrosDaPasta(arquivos, u.id);
@@ -368,7 +371,8 @@ async function sincronizar({ silencioso = true } = {}) {
         if (!/^ficha-.+\.json$/.test(a.nome) || st.lidos[a.nome] === a.modificado) continue;
         try {
           const rec = await lerJSON(a.nome);
-          if (rec.userId === u.id && await store.importarRegistro(rec)) recebidas++;
+          st.conteudo[a.nome] = { id: rec.id, minha: rec.userId === u.id, excluida: !!rec.excluida };
+          if (rec.userId === u.id && await store.importarRegistro(rec, { conferir: completa })) recebidas++;
           st.lidos[a.nome] = a.modificado;
         } catch (e) { console.warn('sync: arquivo ignorado', a.nome, e); }
       }
@@ -379,6 +383,16 @@ async function sincronizar({ silencioso = true } = {}) {
         st.enviados[rec.id] = rec.atualizadaEm;
         enviadas++;
       }
+      // contagem exata: ids únicos deste cadastro na pasta (sem excluídas, sem cópias repetidas)
+      for (const nome of Object.keys(st.conteudo)) if (!naPasta.has(nome)) delete st.conteudo[nome];
+      const idsPasta = new Set(Object.values(st.conteudo).filter((c) => c.minha && !c.excluida).map((c) => c.id));
+      const fichasAqui = (await store.listarFichas()).map((f) => f.id);
+      st.contagem = {
+        pasta: idsPasta.size, aqui: fichasAqui.length,
+        faltamAqui: [...idsPasta].filter((id) => !fichasAqui.includes(id)).length,
+        faltamNaPasta: fichasAqui.filter((id) => !idsPasta.has(id) && !naPasta.has(`ficha-${id}.json`)).length,
+        deOutroCadastro: new Set(Object.values(st.conteudo).filter((c) => !c.minha && !c.excluida).map((c) => c.id)).size,
+      };
       st.ultima = new Date().toISOString();
       st.erro = '';
       st.gravar();
@@ -429,7 +443,7 @@ function telaLista() {
     ${syncAtivo() ? '<button id="bsync" title="Sincronizar agora" aria-label="Sincronizar agora">🔄</button>' : ''}
     <button id="bcfg" title="Configurações" aria-label="Configurações">⚙️</button>`);
   $('#bcfg').onclick = () => go('#/config');
-  $('#bsync')?.addEventListener('click', () => sincronizar({ silencioso: false }));
+  $('#bsync')?.addEventListener('click', () => sincronizar({ silencioso: false, completa: true }));
   sincronizarDeVezEmQuando();
   const q = S.filtro.toLowerCase();
   const lista = S.fichas.filter((f) => !q || `${f.pac.nome} ${f.pac.convenio} ${f.pre.procedimento} ${f.pac.intervencoes.join(' ')}`.toLowerCase().includes(q));
@@ -1491,7 +1505,11 @@ function cardSync() {
     <p class="small">As fichas (criptografadas) ficam também em <b>${esc(armazenamento().nome)}/Dados</b>. Se essa pasta for sincronizada
       com a nuvem (ex.: DriveSync) nos dois aparelhos, cada um recebe as fichas do outro. Use o <b>mesmo cadastro</b> nos dois.</p>
     <p class="small muted">Última sincronização: ${st.ultima ? dataHoraBR(st.ultima) : 'ainda não'}
-      ${st.ultima ? `<br>Fichas na pasta Dados: <b>${st.nFichas ?? '?'}</b> · neste aparelho: <b>${S.fichas.length}</b>` : ''}</p>
+      ${st.contagem ? `<br>Suas fichas na pasta: <b>${st.contagem.pasta}</b> · neste aparelho: <b>${st.contagem.aqui}</b>
+        ${st.contagem.faltamAqui ? `<br><b style="color:var(--warn)">Faltam ${st.contagem.faltamAqui} ficha(s) neste aparelho</b> — toque em “Sincronizar agora”.` : ''}` : ''}</p>
+    ${st.contagem?.deOutroCadastro ? `<p class="note warn small"><b>${st.contagem.deOutroCadastro} ficha(s) na pasta pertencem a OUTRO cadastro</b> e não abrem
+      neste aparelho. Isso acontece quando o outro aparelho ainda não foi unificado. No <b>outro aparelho</b>: abra a lista e toque em
+      “Unificar agora” (ou Configurações → “Usar cadastro de outro aparelho”) e escolha <b>${esc(nomeUser(store.usuarioAtual()))}</b>.</p>` : ''}
     <p class="small muted">Dica: no DriveSync, a sincronização dessa pasta precisa estar <b>nos dois sentidos</b> (“Two-way” / bidirecional)
       nos dois aparelhos — se estiver só “enviar” (“Upload only”), um aparelho não recebe as fichas do outro.</p>
     <div class="btns"><button class="btn pri" id="bsyncnow">🔄 Sincronizar agora</button>
@@ -1501,7 +1519,7 @@ function cardSync() {
 }
 
 function ligarSync() {
-  $('#bsyncnow')?.addEventListener('click', async () => { await sincronizar({ silencioso: false }); telaConfig(); });
+  $('#bsyncnow')?.addEventListener('click', async () => { await sincronizar({ silencioso: false, completa: true }); telaConfig(); });
   $('#badotar')?.addEventListener('click', () => adotarCadastro());
   $('#bdiag')?.addEventListener('click', () => diagnosticoSync());
 }
@@ -1587,7 +1605,7 @@ async function adotarCadastro(preferido) {
     try { localStorage.removeItem('sync:' + atual.id); } catch { /* ok */ }
     S.fichas = (await store.listarFichas()).map(normalizarFicha);
     toast(`Agora usando o cadastro de ${novo.nome}. ${fichasAntigas.length} ficha(s) transferida(s).`, 5000);
-    await sincronizar({ silencioso: false });
+    await sincronizar({ silencioso: false, completa: true });
     go('#/lista');
   } catch (e) { toast(e.message, 5000); }
 }
