@@ -11,7 +11,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const APP_VERSAO = '1.1.3';
+const APP_VERSAO = '1.1.4';
 const DESENVOLVEDOR = 'Adriano A S Mendonça';
 
 // Rodando dentro do APK Android (Capacitor)?
@@ -333,10 +333,10 @@ async function lerJSON(nome) {
 // Cadastros de outros aparelhos presentes na pasta (ignora os já substituídos numa unificação).
 async function cadastrosDaPasta(arquivos, idAtual) {
   const out = [];
-  for (const a of arquivos.filter((x) => /^usuario-.+\.json$/.test(x.nome))) {
+  for (const a of arquivos.filter((x) => ehCadastro(x.nome))) {
     try {
       const d = await lerJSON(a.nome);
-      if (d?.user?.id && d.user.id !== idAtual && !d.substituidoPor) out.push(d.user);
+      if (d?.user?.id && d.user.wPass && d.user.id !== idAtual && !out.some((u) => u.id === d.user.id)) out.push(d.user);
     } catch (e) { console.warn('sync: cadastro ilegível', a.nome, e); }
   }
   return out;
@@ -345,6 +345,13 @@ const soDigitos = (v) => String(v ?? '').replace(/\D/g, '');
 const mesmoAnestesista = (a, b) => soDigitos(a.crm) && soDigitos(a.crm) === soDigitos(b.crm);
 // Regra fixa para os dois aparelhos convergirem: fica sempre o cadastro mais antigo.
 const maisAntigo = (a, b) => (a.criadoEm || '') < (b.criadoEm || '') || ((a.criadoEm || '') === (b.criadoEm || '') && a.id < b.id);
+
+// Arquivo de cada ficha leva também o cadastro: dois cadastros nunca gravam o mesmo nome.
+const nomeFicha = (id, uid) => `ficha-${id}.${uid}.json`;
+// O cadastro é gravado só pelo próprio dono, num nome que ninguém mais usa.
+const nomeCadastro = (uid) => `cadastro-${uid}.json`;
+const ehFicha = (nome) => /^ficha-.+\.json$/.test(nome);
+const ehCadastro = (nome) => /^(cadastro|usuario)-.+\.json$/.test(nome);
 
 let sincronizando = null;
 async function sincronizar({ silencioso = true, completa = false } = {}) {
@@ -355,7 +362,7 @@ async function sincronizar({ silencioso = true, completa = false } = {}) {
     const st = estadoSync();
     let recebidas = 0, enviadas = 0;
     try {
-      await gravarJSON(`usuario-${u.id}.json`, store.usuarioParaPasta());
+      await gravarJSON(nomeCadastro(u.id), store.usuarioParaPasta());
       const { arquivos } = await Arquivos.listarArquivos({ pasta: armazenamento().uri, subpasta: SUB_DADOS });
       // pasta trocada: recomeça (lê e envia tudo de novo)
       if (st.pasta !== armazenamento().uri) { st.pasta = armazenamento().uri; st.lidos = {}; st.enviados = {}; st.conteudo = {}; }
@@ -363,12 +370,12 @@ async function sincronizar({ silencioso = true, completa = false } = {}) {
       if (completa) st.lidos = {};
       st.conteudo ||= {};
       const naPasta = new Set(arquivos.map((a) => a.nome));
-      st.nFichas = arquivos.filter((a) => /^ficha-.+\.json$/.test(a.nome)).length;
+      st.nFichas = arquivos.filter((a) => ehFicha(a.nome)).length;
       const outros = await cadastrosDaPasta(arquivos, u.id);
       st.nCadastros = outros.length + 1;
       S.cadastroParaUnificar = outros.filter((c) => mesmoAnestesista(c, u) && maisAntigo(c, u)).sort((a, b) => (maisAntigo(a, b) ? -1 : 1))[0] || null;
       for (const a of arquivos) {
-        if (!/^ficha-.+\.json$/.test(a.nome) || st.lidos[a.nome] === a.modificado) continue;
+        if (!ehFicha(a.nome) || st.lidos[a.nome] === a.modificado) continue;
         try {
           const rec = await lerJSON(a.nome);
           st.conteudo[a.nome] = { id: rec.id, minha: rec.userId === u.id, excluida: !!rec.excluida };
@@ -378,8 +385,8 @@ async function sincronizar({ silencioso = true, completa = false } = {}) {
       }
       for (const rec of await store.registrosDoUsuario()) {
         // reenvia se mudou OU se o arquivo não está na pasta (apagado, pasta nova, etc.)
-        if (st.enviados[rec.id] === rec.atualizadaEm && naPasta.has(`ficha-${rec.id}.json`)) continue;
-        await gravarJSON(`ficha-${rec.id}.json`, rec);
+        if (st.enviados[rec.id] === rec.atualizadaEm && naPasta.has(nomeFicha(rec.id, u.id))) continue;
+        await gravarJSON(nomeFicha(rec.id, u.id), rec);
         st.enviados[rec.id] = rec.atualizadaEm;
         enviadas++;
       }
@@ -390,8 +397,9 @@ async function sincronizar({ silencioso = true, completa = false } = {}) {
       st.contagem = {
         pasta: idsPasta.size, aqui: fichasAqui.length,
         faltamAqui: [...idsPasta].filter((id) => !fichasAqui.includes(id)).length,
-        faltamNaPasta: fichasAqui.filter((id) => !idsPasta.has(id) && !naPasta.has(`ficha-${id}.json`)).length,
-        deOutroCadastro: new Set(Object.values(st.conteudo).filter((c) => !c.minha && !c.excluida).map((c) => c.id)).size,
+        faltamNaPasta: fichasAqui.filter((id) => !idsPasta.has(id) && !naPasta.has(nomeFicha(id, u.id))).length,
+        // fichas de outro cadastro que ainda não existem aqui (cópias velhas de fichas que já temos não contam)
+        deOutroCadastro: new Set(Object.values(st.conteudo).filter((c) => !c.minha && !c.excluida && !fichasAqui.includes(c.id)).map((c) => c.id)).size,
       };
       st.ultima = new Date().toISOString();
       st.erro = '';
@@ -418,7 +426,7 @@ async function sincronizar({ silencioso = true, completa = false } = {}) {
 async function sincronizarExclusao(id) {
   if (!syncAtivo()) return;
   try {
-    await gravarJSON(`ficha-${id}.json`, { id, userId: store.usuarioAtual().id, atualizadaEm: new Date().toISOString(), excluida: true });
+    await gravarJSON(nomeFicha(id, store.usuarioAtual().id), { id, userId: store.usuarioAtual().id, atualizadaEm: new Date().toISOString(), excluida: true });
   } catch (e) { console.warn('sync exclusão', e); }
 }
 
@@ -1508,8 +1516,9 @@ function cardSync() {
       ${st.contagem ? `<br>Suas fichas na pasta: <b>${st.contagem.pasta}</b> · neste aparelho: <b>${st.contagem.aqui}</b>
         ${st.contagem.faltamAqui ? `<br><b style="color:var(--warn)">Faltam ${st.contagem.faltamAqui} ficha(s) neste aparelho</b> — toque em “Sincronizar agora”.` : ''}` : ''}</p>
     ${st.contagem?.deOutroCadastro ? `<p class="note warn small"><b>${st.contagem.deOutroCadastro} ficha(s) na pasta pertencem a OUTRO cadastro</b> e não abrem
-      neste aparelho. Isso acontece quando o outro aparelho ainda não foi unificado. No <b>outro aparelho</b>: abra a lista e toque em
-      “Unificar agora” (ou Configurações → “Usar cadastro de outro aparelho”) e escolha <b>${esc(nomeUser(store.usuarioAtual()))}</b>.</p>` : ''}
+      neste aparelho. ${S.cadastroParaUnificar
+        ? 'Toque em <b>“Usar cadastro de outro aparelho”</b> aqui embaixo (ou em “Unificar agora”, na lista) para resolver.'
+        : 'Este aparelho já usa o cadastro principal (o mais antigo). No <b>outro aparelho</b>, toque em “Unificar agora” na lista.'}</p>` : ''}
     <p class="small muted">Dica: no DriveSync, a sincronização dessa pasta precisa estar <b>nos dois sentidos</b> (“Two-way” / bidirecional)
       nos dois aparelhos — se estiver só “enviar” (“Upload only”), um aparelho não recebe as fichas do outro.</p>
     <div class="btns"><button class="btn pri" id="bsyncnow">🔄 Sincronizar agora</button>
@@ -1541,11 +1550,11 @@ async function diagnosticoSync() {
     let desc = '';
     try {
       const d = await lerJSON(arq.nome);
-      if (/^usuario-/.test(arq.nome)) {
-        if (d.substituidoPor) desc = `cadastro antigo (substituído por …${curto(d.substituidoPor)})`;
+      if (ehCadastro(arq.nome)) {
+        if (d.substituidoPor) desc = `marca antiga (ignorada)`;
         else if (d.user?.id === u.id) desc = '<b>cadastro deste aparelho</b>';
         else { desc = `<b style="color:var(--warn)">OUTRO cadastro</b>: ${esc(d.user?.nome)} — CRM ${esc(d.user?.crm)} · criado ${dataHoraBR(d.user?.criadoEm)}`; cadOutros++; }
-      } else if (/^ficha-/.test(arq.nome)) {
+      } else if (ehFicha(arq.nome)) {
         if (d.userId === u.id) { desc = d.excluida ? 'ficha excluída' : 'ficha deste cadastro'; fichasMinhas++; }
         else { desc = `ficha de OUTRO cadastro (…${curto(d.userId)})`; fichasOutras++; }
       } else desc = 'outro arquivo';
@@ -1574,8 +1583,15 @@ async function adotarCadastro(preferido) {
   let candidatos = [];
   try {
     const { arquivos } = await Arquivos.listarArquivos({ pasta: armazenamento().uri, subpasta: SUB_DADOS });
-    candidatos = (await cadastrosDaPasta(arquivos, atual.id))
+    const todos = await cadastrosDaPasta(arquivos, atual.id);
+    candidatos = todos.filter((c) => maisAntigo(c, atual))
       .sort((a, b) => (a.id === preferido ? -1 : b.id === preferido ? 1 : (mesmoAnestesista(b, atual) - mesmoAnestesista(a, atual)) || (maisAntigo(a, b) ? -1 : 1)));
+    if (!candidatos.length && todos.length) {
+      return modal({ title: 'Este aparelho já tem o cadastro principal', ok: 'Entendi', cancel: '',
+        body: `<p>O cadastro deste aparelho (criado em ${dataHoraBR(atual.criadoEm)}) é o <b>mais antigo</b>, por isso é ele que fica.</p>
+          <p>No <b>outro aparelho</b>, toque em “Unificar agora” na lista (ou Configurações → “Usar cadastro de outro aparelho”) e digite a senha deste cadastro.
+          As fichas dele passam para este cadastro e os dois aparelhos ficam iguais.</p>` });
+    }
   } catch (e) { return toast('Não foi possível ler a pasta: ' + e.message, 5000); }
   if (!candidatos.length) {
     return modal({ title: 'Nenhum outro cadastro encontrado', ok: 'Entendi', cancel: '',
@@ -1599,8 +1615,6 @@ async function adotarCadastro(preferido) {
     const dadosDoAparelho = { armazenamento: atual.armazenamento, ultimoBackup: atual.ultimoBackup };
     await store.login(novo.id, r.data.senha);
     await store.unificarCadastro(fichasAntigas, atual.id, dadosDoAparelho);
-    // avisa o outro aparelho que este cadastro foi substituído (não oferecer de novo)
-    await gravarJSON(`usuario-${atual.id}.json`, { app: 'ficha-anestesia', tipo: 'usuario', substituidoPor: novo.id }).catch(() => {});
     S.cadastroParaUnificar = null;
     try { localStorage.removeItem('sync:' + atual.id); } catch { /* ok */ }
     S.fichas = (await store.listarFichas()).map(normalizarFicha);
