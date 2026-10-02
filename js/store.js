@@ -88,20 +88,28 @@ export async function criarUsuario({ nome, crm, uf, senha }) {
     favoritos: null,
   };
   await tx('users', 'readwrite', (s) => s.put(user));
-  await abrirSessao(user, raw);
+  await abrirSessao(user, raw, senha);
   return recuperacao;
 }
 
-async function abrirSessao(user, raw) {
+async function abrirSessao(user, raw, senha = null) {
   const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']);
-  sessao = { user, key, raw };
+  // senha fica só na memória, para reconhecer automaticamente outro cadastro seu com a mesma senha
+  sessao = { user, key, raw, senha, extras: new Map() };
+  // chaves de outros cadastros seus (guardadas cifradas com a chave deste cadastro)
+  for (const [id, w] of Object.entries(user.extras || {})) {
+    try {
+      const r2 = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(w.iv) }, key, unb64(w.ct)));
+      sessao.extras.set(id, await crypto.subtle.importKey('raw', r2, 'AES-GCM', false, ['encrypt', 'decrypt']));
+    } catch { /* chave ilegível: ignora */ }
+  }
 }
 
 export async function login(userId, senha) {
   const user = await tx('users', 'readonly', (s) => s.get(userId));
   let raw;
   try { raw = await unwrap(user.wPass, senha); } catch { throw new Error('Senha incorreta'); }
-  await abrirSessao(user, raw);
+  await abrirSessao(user, raw, senha);
   return user;
 }
 
@@ -111,7 +119,7 @@ export async function recuperar(userId, codigo, novaSenha) {
   try { raw = await unwrap(user.wRec, normRec(codigo)); } catch { throw new Error('Código de recuperação inválido'); }
   user.wPass = await wrap(raw, novaSenha);
   await tx('users', 'readwrite', (s) => s.put(user));
-  await abrirSessao(user, raw);
+  await abrirSessao(user, raw, novaSenha);
 }
 
 export async function conferirSenha(senha) {
@@ -205,8 +213,38 @@ export async function registrosDoUsuario() {
 
 // Recebe um registro cifrado vindo da pasta. Vale o mais recente.
 // rec.excluida = rascunho apagado no outro aparelho.
+// Outro cadastro seu é reconhecido quando a senha dele abre a chave (por padrão, a senha desta sessão).
+export async function vincularCadastro(userPasta, senha = sessao.senha) {
+  if (!userPasta?.wPass || userPasta.id === sessao.user.id) return false;
+  if (sessao.extras.has(userPasta.id)) return true;
+  if (!senha) return false;
+  let r2;
+  try { r2 = await unwrap(userPasta.wPass, senha); } catch { return false; }
+  const iv = rand(12);
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, sessao.key, r2);
+  sessao.user.extras = { ...(sessao.user.extras || {}), [userPasta.id]: { iv: b64(iv), ct: b64(ct) } };
+  await salvarUsuario();
+  sessao.extras.set(userPasta.id, await crypto.subtle.importKey('raw', r2, 'AES-GCM', false, ['encrypt', 'decrypt']));
+  return true;
+}
+
+export const conheceCadastro = (id) => id === sessao.user.id || sessao.extras.has(id);
+
 export async function importarRegistro(rec, { conferir = false } = {}) {
-  if (!rec?.id || rec.userId !== sessao.user.id) return false;
+  if (!rec?.id || !conheceCadastro(rec.userId)) return false;
+  // ficha de outro cadastro seu: abre com a chave dele e guarda com a chave deste cadastro
+  if (rec.userId !== sessao.user.id && !rec.excluida) {
+    let f;
+    try {
+      const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(rec.iv) }, sessao.extras.get(rec.userId), unb64(rec.ct));
+      f = JSON.parse(dec.decode(pt));
+    } catch { return false; }
+    f.userId = sessao.user.id;
+    const c = await cifrar(f);
+    rec = { id: rec.id, userId: sessao.user.id, atualizadaEm: rec.atualizadaEm, ...c };
+  } else if (rec.excluida) {
+    rec = { ...rec, userId: sessao.user.id };
+  }
   const cur = await tx('fichas', 'readonly', (s) => s.get(rec.id));
   let substituir = !cur || cur.atualizadaEm < rec.atualizadaEm;
   // na sincronização completa: se a cópia local não abre com a chave atual, troca pela da pasta

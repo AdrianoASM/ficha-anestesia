@@ -11,7 +11,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const APP_VERSAO = '1.1.4';
+const APP_VERSAO = '1.1.5';
 const DESENVOLVEDOR = 'Adriano A S Mendonça';
 
 // Rodando dentro do APK Android (Capacitor)?
@@ -373,13 +373,21 @@ async function sincronizar({ silencioso = true, completa = false } = {}) {
       st.nFichas = arquivos.filter((a) => ehFicha(a.nome)).length;
       const outros = await cadastrosDaPasta(arquivos, u.id);
       st.nCadastros = outros.length + 1;
-      S.cadastroParaUnificar = outros.filter((c) => mesmoAnestesista(c, u) && maisAntigo(c, u)).sort((a, b) => (maisAntigo(a, b) ? -1 : 1))[0] || null;
+      // outro cadastro seu (mesmo CRM): reconhece automaticamente se a senha for a mesma e traz as fichas dele
+      S.cadastroParaUnificar = null;
+      S.cadastroSenhaDiferente = null;
+      let novosVinculos = 0;
+      for (const c of outros.filter((x) => mesmoAnestesista(x, u) && !store.conheceCadastro(x.id))) {
+        if (await store.vincularCadastro(c)) novosVinculos++;
+        else S.cadastroSenhaDiferente ||= c;
+      }
+      if (novosVinculos) st.lidos = {}; // relê tudo para trazer as fichas desse cadastro
       for (const a of arquivos) {
         if (!ehFicha(a.nome) || st.lidos[a.nome] === a.modificado) continue;
         try {
           const rec = await lerJSON(a.nome);
-          st.conteudo[a.nome] = { id: rec.id, minha: rec.userId === u.id, excluida: !!rec.excluida };
-          if (rec.userId === u.id && await store.importarRegistro(rec, { conferir: completa })) recebidas++;
+          st.conteudo[a.nome] = { id: rec.id, minha: store.conheceCadastro(rec.userId), excluida: !!rec.excluida };
+          if (await store.importarRegistro(rec, { conferir: completa })) recebidas++;
           st.lidos[a.nome] = a.modificado;
         } catch (e) { console.warn('sync: arquivo ignorado', a.nome, e); }
       }
@@ -409,7 +417,7 @@ async function sincronizar({ silencioso = true, completa = false } = {}) {
         if (S.f) S.f = S.fichas.find((x) => x.id === S.f.id) || S.f;
         if (!S.f && location.hash.startsWith('#/lista')) telaLista();
       }
-      if (S.cadastroParaUnificar && !recebidas && !S.f && location.hash.startsWith('#/lista') && !$('#bunif')) telaLista();
+      if (S.cadastroSenhaDiferente && !recebidas && !S.f && location.hash.startsWith('#/lista') && !$('#bvinc')) telaLista();
       if (!silencioso || recebidas) toast(`Sincronizado: ${recebidas} recebida(s), ${enviadas} enviada(s)`, 3500);
     } catch (e) {
       st.erro = `${dataHoraBR(new Date().toISOString())}: ${e.message}`; st.gravar();
@@ -457,10 +465,9 @@ function telaLista() {
   const lista = S.fichas.filter((f) => !q || `${f.pac.nome} ${f.pac.convenio} ${f.pre.procedimento} ${f.pac.intervencoes.join(' ')}`.toLowerCase().includes(q));
   const rotulo = { rascunho: 'Em andamento', finalizada: 'Finalizada', revisao: 'Em revisão' };
   const semPasta = NATIVO && !armazenamento().uri && !armazenamento().modo;
-  const unif = S.cadastroParaUnificar;
-  $('#app').innerHTML = `${blocoInstalar()}${unif ? `<div class="note warn">📱 <b>Encontramos o seu cadastro criado em outro aparelho</b> (${esc(nomeUser(unif))}).
-      Para as fichas sincronizarem, os dois aparelhos precisam usar <b>o mesmo cadastro</b>.
-      <div style="margin-top:8px"><button class="btn pri" id="bunif">Unificar agora</button></div></div>` : ''}${semPasta ? `<div class="note warn">📁 Escolha onde salvar os PDFs das fichas (celular ou nuvem). <button class="btn" id="birpasta" style="margin-top:6px">Configurar agora</button></div>` : ''}
+  const outroCad = S.cadastroSenhaDiferente;
+  $('#app').innerHTML = `${blocoInstalar()}${outroCad ? `<div class="note warn">📱 <b>Há fichas do seu outro cadastro</b> (${esc(nomeUser(outroCad))}, criado em ${dataHoraBR(outroCad.criadoEm)}) que não abrem neste aparelho.
+      <div style="margin-top:8px"><button class="btn pri" id="bvinc">Trazer essas fichas</button></div></div>` : ''}${semPasta ? `<div class="note warn">📁 Escolha onde salvar os PDFs das fichas (celular ou nuvem). <button class="btn" id="birpasta" style="margin-top:6px">Configurar agora</button></div>` : ''}
     <div class="toolbar">
       <input type="search" id="busca" placeholder="Buscar paciente, procedimento…" value="${esc(S.filtro)}">
       <button class="btn pri big" id="bnova">＋ Nova ficha</button>
@@ -474,7 +481,7 @@ function telaLista() {
     </div>`;
   ligarInstalar();
   $('#birpasta')?.addEventListener('click', () => go('#/config'));
-  $('#bunif')?.addEventListener('click', () => adotarCadastro(unif.id));
+  $('#bvinc')?.addEventListener('click', () => vincularOutroCadastro(outroCad));
   $('#busca').oninput = (e) => { S.filtro = e.target.value; const p = e.target.selectionStart; telaLista(); const b = $('#busca'); b.focus(); b.setSelectionRange(p, p); };
   $('#bnova').onclick = async () => {
     const f = novaFicha(store.usuarioAtual());
@@ -1516,9 +1523,9 @@ function cardSync() {
       ${st.contagem ? `<br>Suas fichas na pasta: <b>${st.contagem.pasta}</b> · neste aparelho: <b>${st.contagem.aqui}</b>
         ${st.contagem.faltamAqui ? `<br><b style="color:var(--warn)">Faltam ${st.contagem.faltamAqui} ficha(s) neste aparelho</b> — toque em “Sincronizar agora”.` : ''}` : ''}</p>
     ${st.contagem?.deOutroCadastro ? `<p class="note warn small"><b>${st.contagem.deOutroCadastro} ficha(s) na pasta pertencem a OUTRO cadastro</b> e não abrem
-      neste aparelho. ${S.cadastroParaUnificar
-        ? 'Toque em <b>“Usar cadastro de outro aparelho”</b> aqui embaixo (ou em “Unificar agora”, na lista) para resolver.'
-        : 'Este aparelho já usa o cadastro principal (o mais antigo). No <b>outro aparelho</b>, toque em “Unificar agora” na lista.'}</p>` : ''}
+      neste aparelho. ${S.cadastroSenhaDiferente
+        ? 'Na lista, toque em <b>“Trazer essas fichas”</b> e digite a senha do outro cadastro.'
+        : 'Toque em “Sincronizar agora”. Se continuar, o arquivo do outro cadastro ainda não chegou pela nuvem — abra o app no outro aparelho, toque em 🔄 e aguarde o DriveSync.'}</p>` : ''}
     <p class="small muted">Dica: no DriveSync, a sincronização dessa pasta precisa estar <b>nos dois sentidos</b> (“Two-way” / bidirecional)
       nos dois aparelhos — se estiver só “enviar” (“Upload only”), um aparelho não recebe as fichas do outro.</p>
     <div class="btns"><button class="btn pri" id="bsyncnow">🔄 Sincronizar agora</button>
@@ -1574,6 +1581,22 @@ async function diagnosticoSync() {
       <ul class="audit" style="padding-left:18px">${linhas.join('') || '<li>Pasta Dados vazia.</li>'}</ul>
       <p class="small muted">Tire um print desta tela (role até o fim) e envie ao desenvolvedor.</p>`,
   });
+}
+
+// Pede a senha do outro cadastro (quando é diferente da deste) e traz as fichas dele.
+async function vincularOutroCadastro(c) {
+  const r = await modal({
+    title: 'Trazer fichas do outro cadastro',
+    body: `<p class="small">Digite a senha do cadastro <b>${esc(nomeUser(c))}</b> (criado em ${dataHoraBR(c.criadoEm)}), a que você usa no outro aparelho.
+      As fichas dele passam a aparecer aqui também. Nada é apagado.</p>
+      <label class="f">Senha desse cadastro<input type="password" name="senha" required autocomplete="current-password"></label>`,
+    ok: 'Trazer fichas',
+  });
+  if (r.v !== 'ok') return;
+  if (!(await store.vincularCadastro(c, r.data.senha))) return toast('Senha incorreta para esse cadastro', 4000);
+  S.cadastroSenhaDiferente = null;
+  await sincronizar({ silencioso: false, completa: true });
+  if (location.hash.startsWith('#/lista')) telaLista();
 }
 
 // Usa neste aparelho o cadastro criado no outro (mesma chave = mesmas fichas) e traz para ele
