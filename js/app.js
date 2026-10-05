@@ -181,12 +181,15 @@ function telaLicenca() {
     <p class="note">O uso deste app é liberado pelo responsável (${esc(DESENVOLVEDOR)}). Cole abaixo o código de acesso que você recebeu.</p>
     ${S.motivoLicenca ? `<p class="note bad">${esc(S.motivoLicenca)}</p>` : ''}
     <form id="flic">
-      <label class="f">Código<textarea name="codigo" rows="4" required autocomplete="off" autocapitalize="off" spellcheck="false" style="font-family:ui-monospace,monospace;font-size:13px"></textarea></label>
+      <label class="f">Código<textarea name="codigo" rows="4" required autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" style="font-family:ui-monospace,monospace;font-size:13px"></textarea></label>
       <p><button class="btn pri big block">Liberar</button></p>
     </form></div>`;
   $('#flic').onsubmit = async (e) => {
     e.preventDefault();
-    const cod = e.target.codigo.value.replace(/\s+/g, '');
+    // aceita o código sozinho, o link ou a mensagem inteira colada do WhatsApp
+    const texto = e.target.codigo.value;
+    const achado = texto.replace(/\s+/g, '').match(/[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{40,}/);
+    const cod = achado ? achado[0] : texto.replace(/\s+/g, '');
     const r = await licenca.verificar(cod);
     if (!r.ok) { S.motivoLicenca = r.motivo; return telaLicenca(); }
     licenca.salvar(cod);
