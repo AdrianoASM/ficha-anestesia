@@ -12,7 +12,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const APP_VERSAO = '1.2.0';
+const APP_VERSAO = '1.2.1';
 const DESENVOLVEDOR = 'Adriano A S Mendonça';
 
 // Rodando dentro do APK Android (Capacitor)?
