@@ -1,4 +1,5 @@
 import * as store from './store.js';
+import * as licenca from './licenca.js';
 import {
   VIAS, UNIDADES, DROGAS_PADRAO, FLUIDOS, EVENTOS_RAPIDOS, MONITORIZACAO, EQUIPAMENTOS,
   PRE_GRUPOS, ALDRETE, ALDRETE_TEMPOS, novaFicha, uid, hhmm, dataBR, dataHoraBR, horaParaISO,
@@ -11,7 +12,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const APP_VERSAO = '1.1.6';
+const APP_VERSAO = '1.2.0';
 const DESENVOLVEDOR = 'Adriano A S Mendonça';
 
 // Rodando dentro do APK Android (Capacitor)?
@@ -155,10 +156,51 @@ async function salvarAgora() {
 function go(hash) { if (location.hash !== hash) location.hash = hash; else render(); }
 window.addEventListener('hashchange', () => render());
 
+// ---------------------------------------------------------------- código de acesso
+async function acessoLiberado() {
+  // código recebido por link: ...#licenca=CODIGO
+  if (location.hash.startsWith('#licenca=')) {
+    const cod = decodeURIComponent(location.hash.slice('#licenca='.length));
+    history.replaceState(null, '', location.pathname + location.search);
+    const r = await licenca.verificar(cod);
+    if (r.ok) { licenca.salvar(cod); S.motivoLicenca = ''; toast(`Acesso liberado para ${r.dados.n}`, 4000); } else S.motivoLicenca = r.motivo;
+  }
+  const salvo = licenca.codigoSalvo();
+  const r = await licenca.verificar(salvo);
+  S.licenca = r.ok ? r.dados : null;
+  if (!r.ok && salvo) S.motivoLicenca ||= r.motivo;
+  return r.ok;
+}
+
+function telaLicenca() {
+  topbar(`<img src="icons/logo.png" alt=""><div class="ttl"><b>Ficha de Anestesia</b><small>CEA — Excelência em Anestesia</small></div>`);
+  $('#tabs').hidden = true;
+  $('#app').innerHTML = `<div class="login card">
+    <img class="logo" src="icons/logo.png" alt="CEA">
+    <h1>Código de acesso</h1>
+    <p class="note">O uso deste app é liberado pelo responsável (${esc(DESENVOLVEDOR)}). Cole abaixo o código de acesso que você recebeu.</p>
+    ${S.motivoLicenca ? `<p class="note bad">${esc(S.motivoLicenca)}</p>` : ''}
+    <form id="flic">
+      <label class="f">Código<textarea name="codigo" rows="4" required autocomplete="off" autocapitalize="off" spellcheck="false" style="font-family:ui-monospace,monospace;font-size:13px"></textarea></label>
+      <p><button class="btn pri big block">Liberar</button></p>
+    </form></div>`;
+  $('#flic').onsubmit = async (e) => {
+    e.preventDefault();
+    const cod = e.target.codigo.value.replace(/\s+/g, '');
+    const r = await licenca.verificar(cod);
+    if (!r.ok) { S.motivoLicenca = r.motivo; return telaLicenca(); }
+    licenca.salvar(cod);
+    S.motivoLicenca = '';
+    toast(`Acesso liberado para ${r.dados.n}`, 4000);
+    render();
+  };
+}
+
 async function render() {
   clearInterval(S.timer);
   if (S.wake) { S.wake.release().catch(() => {}); S.wake = null; }
   await salvarAgora();
+  if (!(await acessoLiberado())) return telaLicenca();
   const user = store.usuarioAtual();
   $('#tabs').hidden = true;
   if (!user) return telaLogin();
@@ -465,8 +507,11 @@ function telaLista() {
   const lista = S.fichas.filter((f) => !q || `${f.pac.nome} ${f.pac.hospital || ''} ${f.pac.convenio} ${f.pre.procedimento} ${f.pac.intervencoes.join(' ')}`.toLowerCase().includes(q));
   const rotulo = { rascunho: 'Em andamento', finalizada: 'Finalizada', revisao: 'Em revisão' };
   const semPasta = NATIVO && !armazenamento().uri && !armazenamento().modo;
+  const venc = S.licenca?.e ? Math.ceil((new Date(S.licenca.e + 'T23:59') - new Date()) / 86400000) : null;
+  const avisoVenc = venc !== null && venc <= 10
+    ? `<div class="note warn">⏳ Seu acesso vence em <b>${venc} dia(s)</b> (${dataBR(S.licenca.e)}). Peça um novo código ao responsável.</div>` : '';
   const outroCad = S.cadastroSenhaDiferente;
-  $('#app').innerHTML = `${blocoInstalar()}${outroCad ? `<div class="note warn">📱 <b>Há fichas do seu outro cadastro</b> (${esc(nomeUser(outroCad))}, criado em ${dataHoraBR(outroCad.criadoEm)}) que não abrem neste aparelho.
+  $('#app').innerHTML = `${avisoVenc}${blocoInstalar()}${outroCad ? `<div class="note warn">📱 <b>Há fichas do seu outro cadastro</b> (${esc(nomeUser(outroCad))}, criado em ${dataHoraBR(outroCad.criadoEm)}) que não abrem neste aparelho.
       <div style="margin-top:8px"><button class="btn pri" id="bvinc">Trazer essas fichas</button></div></div>` : ''}${semPasta ? `<div class="note warn">📁 Escolha onde salvar os PDFs das fichas (celular ou nuvem). <button class="btn" id="birpasta" style="margin-top:6px">Configurar agora</button></div>` : ''}
     <div class="toolbar">
       <input type="search" id="busca" placeholder="Buscar paciente, procedimento…" value="${esc(S.filtro)}">
@@ -1484,6 +1529,8 @@ function telaConfig() {
       <div class="tl" id="favlist">${favs.map((x, i) => `<div class="ev dr"><span class="t">${esc(x.via)}</span><span>${esc(x.nome)}<span class="k">${num(x.dose)} ${esc(x.unid)} · ampola ${x.amp ? num(x.amp) + ' ' + esc(x.unid) : '—'}</span></span>
         <span><button data-fe="${i}" aria-label="Editar">✏️</button><button data-fd="${i}" aria-label="Remover">🗑️</button></span></div>`).join('')}</div>
       <div class="btns" style="margin-top:10px"><button class="btn" id="bfadd">＋ Adicionar</button><button class="btn" id="bfreset">Restaurar lista padrão</button></div>`)
+    + card('Acesso ao app', `<p>Liberado para <b>${esc(S.licenca?.n || '')}</b> · ${S.licenca?.e ? `válido até <b>${dataBR(S.licenca.e)}</b>` : '<b>sem validade</b>'}</p>
+      <button class="btn" id="btrocalic">Trocar código de acesso</button>`)
     + card('Sessão', `<button class="btn bad" id="bsair">Sair</button>`)
     + card('Sobre', `<div style="display:flex;gap:14px;align-items:center">
         <img src="icons/logo.png" alt="" width="64" height="64" style="border-radius:12px;background:#fff">
@@ -1549,6 +1596,10 @@ function telaConfig() {
   $$('[data-fd]').forEach((b) => (b.onclick = () => salvarFavs(favs.filter((_, i) => i !== +b.dataset.fd))));
   $('#bfadd').onclick = () => editarFav(-1);
   $('#bfreset').onclick = async () => { if (await confirmar('Lista padrão', 'Substituir seus favoritos pela lista padrão?')) salvarFavs(null); };
+  $('#btrocalic').onclick = async () => {
+    if (!(await confirmar('Trocar código', 'Remover o código de acesso atual e digitar outro?'))) return;
+    licenca.remover(); S.motivoLicenca = ''; render();
+  };
   $('#bsair').onclick = () => { store.sair(); S.fichas = []; go('#/'); };
 }
 
@@ -1747,3 +1798,6 @@ if (!NATIVO && 'serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 render();
+licenca.atualizarBloqueios().then(async () => {
+  if (S.licenca && !(await licenca.verificar(licenca.codigoSalvo())).ok) render();
+});
