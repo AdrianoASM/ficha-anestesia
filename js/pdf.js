@@ -968,6 +968,10 @@ function pagina2(P, f) {
 
 function rodape(P, f, p, total) {
   const an = f.anestesista;
+  // paciente e hospital em todas as folhas
+  const ident = [`Paciente: ${f.pac.nome || '—'}`, f.pac.hospital ? `Hospital: ${f.pac.hospital}` : ''].filter(Boolean).join('   ·   ');
+  P.line(9, 287.2, 199, 287.2, 0.15);
+  P.t(ident, 9, 289.9, { size: 7.2, bold: true, maxW: 190 });
   let st = 'RASCUNHO — ficha não finalizada';
   if (f.status === 'finalizada') {
     st = `Anestesiologista: ${an.nome} (CRM ${an.crm}${an.uf ? '/' + an.uf : ''})`;
