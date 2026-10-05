@@ -202,7 +202,7 @@ export function novaFicha(user) {
     auditoria: [{ em: new Date().toISOString(), acao: 'Ficha criada', por: `${user.nome} (CRM ${user.crm})` }],
     anestesista: { nome: user.nome, crm: user.crm, uf: user.uf },
     pac: {
-      nome: '', idade: '', data: hojeISO(), sexo: '', convenio: '', matricula: '', carater: '',
+      nome: '', hospital: '', idade: '', data: hojeISO(), sexo: '', convenio: '', matricula: '', carater: '',
       peso: '', altura: '', nascimento: '', jejum: '', cirurgiao: '', cirurgiaoCrm: '', aux1: '', aux2: '', intervencoes: ['', '', '', '', ''],
     },
     tempos: { inicioAnest: null, inicioCir: null, fimCir: null, fimAnest: null },
@@ -317,6 +317,7 @@ export const rotuloInfusao = (inf) => `${inf.nome} (${inf.tci ? 'TCI ' + inf.tci
 // Completa fichas criadas em versões anteriores do app com os campos novos.
 export function normalizarFicha(f) {
   f.pac.cirurgiaoCrm ??= '';
+  f.pac.hospital ??= '';
   f.pac.altura ??= '';
   f.pac.nascimento ??= '';
   f.infusoes ??= [];

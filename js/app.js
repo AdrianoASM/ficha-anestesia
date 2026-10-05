@@ -11,7 +11,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const APP_VERSAO = '1.1.5';
+const APP_VERSAO = '1.1.6';
 const DESENVOLVEDOR = 'Adriano A S Mendonça';
 
 // Rodando dentro do APK Android (Capacitor)?
@@ -462,7 +462,7 @@ function telaLista() {
   $('#bsync')?.addEventListener('click', () => sincronizar({ silencioso: false, completa: true }));
   sincronizarDeVezEmQuando();
   const q = S.filtro.toLowerCase();
-  const lista = S.fichas.filter((f) => !q || `${f.pac.nome} ${f.pac.convenio} ${f.pre.procedimento} ${f.pac.intervencoes.join(' ')}`.toLowerCase().includes(q));
+  const lista = S.fichas.filter((f) => !q || `${f.pac.nome} ${f.pac.hospital || ''} ${f.pac.convenio} ${f.pre.procedimento} ${f.pac.intervencoes.join(' ')}`.toLowerCase().includes(q));
   const rotulo = { rascunho: 'Em andamento', finalizada: 'Finalizada', revisao: 'Em revisão' };
   const semPasta = NATIVO && !armazenamento().uri && !armazenamento().modo;
   const outroCad = S.cadastroSenhaDiferente;
@@ -475,7 +475,7 @@ function telaLista() {
     <div class="lista">
       ${lista.map((f) => `<button class="item" data-id="${f.id}">
           <div class="main"><b>${esc(f.pac.nome || '(paciente sem nome)')}</b>
-          <div class="sub">${dataBR(f.pac.data)} · ${esc(f.pac.intervencoes[0] || f.pre.procedimento || 'procedimento não informado')}${f.pac.convenio ? ' · ' + esc(f.pac.convenio) : ''}</div></div>
+          <div class="sub">${dataBR(f.pac.data)}${f.pac.hospital ? ' · ' + esc(f.pac.hospital) : ''} · ${esc(f.pac.intervencoes[0] || f.pre.procedimento || 'procedimento não informado')}${f.pac.convenio ? ' · ' + esc(f.pac.convenio) : ''}</div></div>
           <span class="badge ${f.status}">${rotulo[f.status]}</span></button>`).join('')
         || `<div class="card muted">${S.fichas.length ? 'Nenhuma ficha encontrada.' : 'Nenhuma ficha ainda. Toque em “Nova ficha” para começar.'}</div>`}
     </div>`;
@@ -560,6 +560,16 @@ function mudou(path) {
     if (ref < new Date(ref.getFullYear(), n.getMonth(), n.getDate(), 12)) anos--;
     if (anos >= 0) { S.f.pac.idade = String(anos); const el = $('[data-f="pac.idade"]'); if (el) el.value = anos; }
   }
+  // CRM já conhecido: completa o nome do cirurgião
+  if (path === 'pac.cirurgiaoCrm') {
+    const nome = crmsConhecidos().find(([crm]) => soDigitos(crm) && soDigitos(crm) === soDigitos(S.f.pac.cirurgiaoCrm))?.[1];
+    if (nome && S.f.pac.cirurgiao !== nome) { S.f.pac.cirurgiao = nome; const el = $('[data-f="pac.cirurgiao"]'); if (el) el.value = nome; }
+  }
+  // cirurgião já conhecido: completa o CRM com o usado da última vez
+  if (path === 'pac.cirurgiao' && !S.f.pac.cirurgiaoCrm) {
+    const crm = crmDoCirurgiao(S.f.pac.cirurgiao);
+    if (crm) { S.f.pac.cirurgiaoCrm = crm; const el = $('[data-f="pac.cirurgiaoCrm"]'); if (el) el.value = crm; }
+  }
   if (path === 'pac.nome') { const b = $('.topbar .ttl b'); if (b) b.textContent = S.f.pac.nome || 'Nova ficha'; }
   $$('[data-calc]').forEach((el) => {
     const [tipo, arg] = el.dataset.calc.split(':');
@@ -577,10 +587,36 @@ const linha = (label, html) => `<div class="row-l"><span class="lbl">${label}</s
 const card = (titulo, html) => `<section class="card"><h2>${titulo}</h2>${html}</section>`;
 const SN = ['Sim', 'Não'];
 
+// Nomes de cirurgiões e auxiliares já usados nas fichas (para sugerir ao digitar).
+function nomesEquipe() {
+  const nomes = new Set();
+  for (const f of S.fichas) for (const n of [f.pac.cirurgiao, f.pac.aux1, f.pac.aux2]) if (n?.trim()) nomes.add(n.trim());
+  return [...nomes].sort((a, b) => a.localeCompare(b, 'pt'));
+}
+
+// CRMs de cirurgiões já usados, com o nome mais recente de cada um: [[crm, nome], ...]
+function crmsConhecidos() {
+  const mapa = new Map();
+  [...S.fichas].filter((x) => x.id !== S.f?.id && x.pac.cirurgiaoCrm?.trim() && x.pac.cirurgiao?.trim())
+    .sort((a, b) => (a.atualizadaEm > b.atualizadaEm ? 1 : -1))
+    .forEach((x) => mapa.set(soDigitos(x.pac.cirurgiaoCrm) || x.pac.cirurgiaoCrm.trim(), [x.pac.cirurgiaoCrm.trim(), x.pac.cirurgiao.trim()]));
+  return [...mapa.values()].sort((a, b) => a[1].localeCompare(b[1], 'pt'));
+}
+
+function crmDoCirurgiao(nome) {
+  const n = String(nome || '').trim().toLowerCase();
+  if (!n) return '';
+  const f = [...S.fichas].filter((x) => x.id !== S.f?.id && x.pac.cirurgiao?.trim().toLowerCase() === n && x.pac.cirurgiaoCrm)
+    .sort((a, b) => (a.atualizadaEm > b.atualizadaEm ? -1 : 1))[0];
+  return f ? f.pac.cirurgiaoCrm : '';
+}
+
 function abaPaciente() {
   const f = S.f;
   return card('Paciente', `<div class="grid">
       ${inp('pac.nome', 'Nome', { cls: 'full' })}
+      ${inp('pac.hospital', 'Hospital', { cls: 'full', list: 'hospitais' })}
+      <datalist id="hospitais">${[...new Set(S.fichas.map((x) => x.pac.hospital).filter(Boolean))].sort().map((h) => `<option value="${esc(h)}">`).join('')}</datalist>
       ${inp('pac.nascimento', 'Data de nascimento', { type: 'date' })}
       ${inp('pac.idade', 'Idade', { im: 'numeric' })}
       ${inp('pac.data', 'Data da cirurgia', { type: 'date' })}
@@ -595,10 +631,12 @@ function abaPaciente() {
     ${linha('Caráter', chips('pac.carater', ['Eletivo', 'Urgência', 'Emergência']))}`)
   + card('Equipe', `<div class="grid">
       <label class="f span2">Anestesiologista<input type="text" value="${esc(`${f.anestesista.nome} — CRM ${f.anestesista.crm}/${f.anestesista.uf}`)}" disabled></label>
-      ${inp('pac.cirurgiao', 'Cirurgião', { cls: 'span2' })}
-      ${inp('pac.cirurgiaoCrm', 'CRM do cirurgião', { im: 'numeric' })}
-      ${inp('pac.aux1', '1º Auxiliar')}
-      ${inp('pac.aux2', '2º Auxiliar')}
+      ${inp('pac.cirurgiao', 'Cirurgião', { cls: 'span2', list: 'cirurgioes' })}
+      <datalist id="cirurgioes">${nomesEquipe().map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
+      ${inp('pac.cirurgiaoCrm', 'CRM do cirurgião', { im: 'numeric', list: 'crms' })}
+      <datalist id="crms">${crmsConhecidos().map(([crm, nome]) => `<option value="${esc(crm)}" label="${esc(nome)}">${esc(nome)}</option>`).join('')}</datalist>
+      ${inp('pac.aux1', '1º Auxiliar', { list: 'cirurgioes' })}
+      ${inp('pac.aux2', '2º Auxiliar', { list: 'cirurgioes' })}
     </div>`)
   + card('Intervenção cirúrgica realizada', `<div class="grid g2">
       ${[0, 1, 2, 3, 4].map((i) => inp(`pac.intervencoes.${i}`, `${i + 1}.`)).join('')}</div>`);

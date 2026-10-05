@@ -188,8 +188,9 @@ function pagina1(P, f, logo, favoritos) {
   P.t('Sexo', 181, 28);
   P.circ(188, 28, a.sexo === 'F', 'F', { size: 7 });
   P.circ(194, 28, a.sexo === 'M', 'M', { size: 7 });
-  P.campo('Convênio', a.convenio, 9, 33.6, 51);
-  P.campo('Matrícula', a.matricula, 52, 33.6, 146);
+  P.campo('Hospital', a.hospital, 9, 33.6, 74);
+  P.campo('Convênio', a.convenio, 75.5, 33.6, 112);
+  P.campo('Matrícula', a.matricula, 113.5, 33.6, 146);
   P.t('Caráter:', 148, 33.6);
   P.circ(158.5, 33.6, a.carater === 'Eletivo', 'Eletivo');
   P.circ(171, 33.6, a.carater === 'Urgência', 'Urgência');
@@ -253,6 +254,7 @@ function cabecalhoContinuacao(P, f, logo, n, texto) {
   titulo(P, `FICHA DE ANESTESIA — continuação (${n})`, logo);
   P.campo('Nome:', f.pac.nome, 9, 28, 131);
   P.campo('Data', dataBR(f.pac.data), 147.5, 28, 179);
+  P.campo('Hospital', f.pac.hospital, 9, 33.6, 131);
   P.t(texto, 9, 50, { size: 8, italic: true });
 }
 
