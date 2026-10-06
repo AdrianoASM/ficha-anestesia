@@ -188,9 +188,9 @@ function pagina1(P, f, logo, favoritos) {
   P.t('Sexo', 181, 28);
   P.circ(188, 28, a.sexo === 'F', 'F', { size: 7 });
   P.circ(194, 28, a.sexo === 'M', 'M', { size: 7 });
-  P.campo('Hospital', a.hospital, 9, 33.6, 74);
-  P.campo('Convênio', a.convenio, 75.5, 33.6, 112);
-  P.campo('Matrícula', a.matricula, 113.5, 33.6, 146);
+  P.campo('Hospital', a.hospital, 9, 33.6, 68);
+  P.campo('Convênio', a.convenio, 69.5, 33.6, 102);
+  P.campo('Acomodação', a.matricula, 103.5, 33.6, 146);
   P.t('Caráter:', 148, 33.6);
   P.circ(158.5, 33.6, a.carater === 'Eletivo', 'Eletivo');
   P.circ(171, 33.6, a.carater === 'Urgência', 'Urgência');
@@ -584,6 +584,9 @@ function anotacoesLabs(P, f) {
   const lh = 3.5, x = 32.5, w = 132.5, fs = 7.2;
   const linhas = [];
   doc.setFont('helvetica', 'normal');
+  for (const tc of [...(f.transferencias || [])].sort((a, b) => (a.t > b.t ? 1 : -1))) {
+    linhas.push(...wrapText(doc.setFontSize(fs), `${hhmm(tc.t)} Transferência de cuidados para ${tc.nome}${tc.crm ? ` (CRM ${tc.crm})` : ''}.`, w));
+  }
   if (f.anotacoes) linhas.push(...wrapText(doc.setFontSize(fs), 'Obs.: ' + f.anotacoes, w));
   const ev = eventosNumerados(f);
   if (ev.length) {
@@ -637,7 +640,7 @@ const ROT_PDF = {
   'Angina / Coronariopatia': 'Angina/Coronariop.', 'Infarto do miocárdio': 'IAM', 'Insuf. cardíaca': 'Insuf. cardíaca',
   'Asma / Bronquite': 'Asma/Bronquite', 'Dependência de O₂': 'Dependência O2', 'Refluxo gastroesofágico': 'Refluxo GE',
   'Obstrução intestinal': 'Obstr. intestinal', 'Vômito / diarreia': 'Vômito/diarreia', 'Dormência / fraqueza': 'Dormência/fraqueza',
-  'Doença renal crônica': 'Doença renal crônica', 'Insuf. renal aguda': 'Insuf. renal aguda', 'Patologia da tireoide': 'Tireoide',
+  'Doença renal crônica': 'DRC', 'Insuf. renal aguda': 'IRA', 'Patologia da tireoide': 'Tireoide',
 };
 
 const ALDRETE_LEGENDA = {
@@ -695,12 +698,13 @@ function pagina2(P, f) {
   // ----- sistemas
   const cw4 = W / 4;
   const grp = Object.fromEntries(PRE_GRUPOS.map((g) => [g[0], g]));
-  const sistema = (k, ci, y, h, extra) => {
+  const sistema = (k, ci, y, h, extra, cols = 4) => {
     const [, titulo, itens] = grp[k];
-    const x = X0 + ci * cw4;
-    celula(x, y, cw4, h, titulo, p.negativos[k]);
+    const cw = W / cols;
+    const x = X0 + ci * cw;
+    celula(x, y, cw, h, titulo, p.negativos[k]);
     let i = 0;
-    const meia = (cw4 - 2) / 2;
+    const meia = (cw - 2) / 2;
     const pos = () => ({ x: x + 1.3 + (i % 2) * meia, y: y + 6.4 + Math.floor(i / 2) * 2.75 });
     for (const [ik, il] of itens) {
       let lab = ROT_PDF[il] || il;
@@ -712,18 +716,19 @@ function pagina2(P, f) {
     }
     let ly = y + 6.4 + Math.ceil(itens.length / 2) * 2.75;
     if (extra) ly = extra(x, ly);
-    if (p.outros[k] || ly < y + h - 1) P.campo('Outras:', p.outros[k], x + 1.3, Math.min(ly, y + h - 1.2), x + cw4 - 1.3, { size: 5.8, vsize: 7 });
+    if (p.outros[k] || ly < y + h - 1) P.campo('Outras:', p.outros[k], x + 1.3, Math.min(ly, y + h - 1.2), x + cw - 1.3, { size: 5.8, vsize: 7 });
   };
   const yA = 28.3, hA = 21.5;
   sistema('cardio', 0, yA, hA, (x, ly) => { P.campo('Toler. exercício:', p.toleranciaExercicio, x + 1.3, ly, x + cw4 - 1.3, { size: 5.8, vsize: 7 }); return ly + 2.9; });
   sistema('respiratorio', 1, yA, hA);
   sistema('gastro', 2, yA, hA);
   sistema('neuro', 3, yA, hA);
-  const yB = yA + hA, hB = 13.5;
-  sistema('renal', 0, yB, hB);
-  sistema('endocrino', 1, yB, hB);
-  sistema('infeccioso', 2, yB, hB);
-  sistema('habitos', 3, yB, hB);
+  const yB = yA + hA, hB = 17;
+  sistema('renal', 0, yB, hB, null, 5);
+  sistema('endocrino', 1, yB, hB, null, 5);
+  sistema('infeccioso', 2, yB, hB, null, 5);
+  sistema('psiquiatrico', 3, yB, hB, null, 5);
+  sistema('habitos', 4, yB, hB, null, 5);
 
   // ----- câncer / gravidez / históricos / outras comorbidades
   const yC = yB + hB, hC = 12;
@@ -867,23 +872,26 @@ function pagina2(P, f) {
   const s = f.srpa;
   const y0 = ySep + 1.6;
   band('CUIDADOS NA SRPA', y0);
-  const barra = (rot, y, h, pas, pad, fc, spo2) => {
+  const barra = (rot, y, h, pas, pad, fc, spo2, dor, escala) => {
     P.rect(X0, y, W, 5, { fill: [240, 240, 240], lw: 0.3 });
     const by = y + 3.7;
-    P.campo(rot, h, 8.5, by, 58, { size: 7.5, vsize: 8.6 });
-    P.t('PA:', 64, by, { size: 7.5, bold: true });
-    P.line(69, by + 0.5, 78, by + 0.5, 0.15); P.v(pas, 69.5, by - 0.1);
-    P.t('x', 79, by, { size: 7.5 });
-    P.line(82, by + 0.5, 90, by + 0.5, 0.15); P.v(pad, 82.5, by - 0.1);
-    P.t('mmHg', 91, by, { size: 7.5 });
-    P.t('FC:', 122, by, { size: 7.5, bold: true });
-    P.line(127, by + 0.5, 135, by + 0.5, 0.15); P.v(fc, 127.5, by - 0.1);
-    P.t('bpm', 136, by, { size: 7.5 });
-    P.t('SpO2:', 162, by, { size: 7.5, bold: true });
-    P.line(171, by + 0.5, 179, by + 0.5, 0.15); P.v(spo2, 171.5, by - 0.1);
-    P.t('%', 180, by, { size: 7.5 });
+    P.campo(rot, h, 8.5, by, 55, { size: 7.5, vsize: 8.6 });
+    P.t('PA:', 58, by, { size: 7.5, bold: true });
+    P.line(63, by + 0.5, 72, by + 0.5, 0.15); P.v(pas, 63.5, by - 0.1);
+    P.t('x', 73, by, { size: 7.5 });
+    P.line(76, by + 0.5, 84, by + 0.5, 0.15); P.v(pad, 76.5, by - 0.1);
+    P.t('mmHg', 85, by, { size: 7.5 });
+    P.t('FC:', 103, by, { size: 7.5, bold: true });
+    P.line(108, by + 0.5, 116, by + 0.5, 0.15); P.v(fc, 108.5, by - 0.1);
+    P.t('bpm', 117, by, { size: 7.5 });
+    P.t('SpO2:', 131, by, { size: 7.5, bold: true });
+    P.line(140, by + 0.5, 148, by + 0.5, 0.15); P.v(spo2, 140.5, by - 0.1);
+    P.t('%', 149, by, { size: 7.5 });
+    P.t('Dor:', 160, by, { size: 7.5, bold: true });
+    P.line(166.5, by + 0.5, 173, by + 0.5, 0.15); P.v(dor, 167, by - 0.1);
+    P.t(escala === 'Criança' ? '/5 (criança)' : '/10 (adulto)', 174, by, { size: 6.5 });
   };
-  barra('HORA DA ADMISSÃO:', y0 + 6.4, s.admHora, s.admPas, s.admPad, s.admFc, s.admSpo2);
+  barra('HORA DA ADMISSÃO:', y0 + 6.4, s.admHora, s.admPas, s.admPad, s.admFc, s.admSpo2, s.admDor, s.admDorEscala);
 
   // Aldrete e Kroulik compacto: uma linha por critério, pontuação em cada tempo
   const ay = y0 + 13.4, ah = 4.4, arh = 3.7;
@@ -948,12 +956,12 @@ function pagina2(P, f) {
   }
 
   const alY = iy0 + 4.5 + ilh * nIl + 2;
-  barra('HORA DA ALTA:', alY, s.altaHora, s.altaPas, s.altaPad, s.altaFc, s.altaSpo2);
+  barra('HORA DA ALTA:', alY, s.altaHora, s.altaPas, s.altaPad, s.altaFc, s.altaSpo2, s.altaDor, s.altaDorEscala);
   const ey = alY + 10.5;
   P.t('ENCAMINHADO:', X0, ey, { size: 8, bold: true });
-  P.box(31.5, ey, s.encaminhado === 'APT', 'APT', { size: 8, s: 2.8 });
-  P.box(44.5, ey, s.encaminhado === 'UTI', 'UTI', { size: 8, s: 2.8 });
-  P.box(56.5, ey, s.encaminhado === 'Residência', 'Residência', { size: 8, s: 2.8 });
+  P.box(31.5, ey, ['Leito', 'APT'].includes(s.encaminhado), 'Leito', { size: 8, s: 2.8 });
+  P.box(47, ey, s.encaminhado === 'UTI', 'UTI', { size: 8, s: 2.8 });
+  P.box(59, ey, s.encaminhado === 'Residência', 'Residência', { size: 8, s: 2.8 });
 
   // Médico responsável pela SRPA: o anestesista ou outro médico informado
   const an = f.anestesista;

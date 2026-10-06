@@ -77,6 +77,8 @@ export const PRE_GRUPOS = [
   ['renal', 'Renal', [['drc', 'Doença renal crônica'], ['ira', 'Insuf. renal aguda'], ['dialise', 'Diálise']], true],
   ['endocrino', 'Endócrino', [['diabetes', 'Diabetes'], ['obesidade', 'Obesidade'], ['tireoide', 'Patologia da tireoide']], true],
   ['infeccioso', 'Infeccioso', [['hiv', 'HIV'], ['hepatite', 'Hepatite viral']], true],
+  ['psiquiatrico', 'Transtorno psiquiátrico', [['fobia', 'Fobia'], ['esquizofrenia', 'Esquizofrenia'], ['depressao', 'Depressão'],
+    ['ansiedade', 'Ansiedade'], ['demencia', 'Demência']], true],
   ['habitos', 'Hábitos sociais', [['tabaco', 'Tabaco'], ['alcool', 'Álcool'], ['drogas', 'Drogas']], true],
 ];
 // Grupos retirados da ficha (dados antigos vão para "Outros")
@@ -117,6 +119,25 @@ export const INFUSOES = [
   { nome: 'Desflurano', unid: '%', faixa: '3–8 (CAM ≈ 6)', gas: true },
   { nome: 'Isoflurano', unid: '%', faixa: '0,5–1,5 (CAM ≈ 1,15)', gas: true },
 ];
+// Textos prontos (breves) para as Anotações. O usuário pode editar a lista em Configurações.
+export const TEXTOS_PADRAO = [
+  'Paciente recebido em sala, identificado, consciente e orientado.',
+  'Monitorização: ECG, SpO₂, PANI e capnografia.',
+  'Acesso venoso periférico em MS, cateter 20G.',
+  'Pré-oxigenação com O₂ 100% sob máscara facial.',
+  'Indução venosa sem intercorrências.',
+  'Indução em sequência rápida com manobra de Sellick.',
+  'IOT sob laringoscopia direta, Cormack I, TOT com balonete; posição confirmada por capnografia e ausculta.',
+  'Máscara laríngea inserida sem dificuldade, ventilação adequada.',
+  'Raquianestesia em L3-L4, agulha Quincke 27G, punção única, LCR claro.',
+  'Peridural em L2-L3, agulha Tuohy 16G, cateter 4 cm no espaço peridural, dose-teste negativa.',
+  'Bloqueio de nervo periférico guiado por ultrassom, sem intercorrências.',
+  'Proteção ocular e dos pontos de pressão; posicionamento cuidadoso.',
+  'Procedimento sem intercorrências, hemodinâmica estável.',
+  'Reversão do bloqueio neuromuscular; extubação acordado, com reflexos presentes.',
+  'Paciente encaminhado à SRPA estável, em ventilação espontânea.',
+];
+
 export const UNID_INFUSAO = ['mcg/kg/min', 'mcg/kg/h', 'mg/kg/h', 'mg/h', 'mcg/min', 'UI/min', 'UI/h', 'mL/h', 'L/min', '%'];
 
 export const ALDRETE = [
@@ -210,6 +231,7 @@ export function novaFicha(user) {
     drogas: [], // {id, t, nome, dose, unid, via}
     fluidos: [], // {id, t, nome, tipo, vol}
     eventos: [], // {id, t, texto}
+    transferencias: [], // {id, t, nome, crm} — transferência de cuidados para outro anestesista
     infusoes: [], // {id, nome, unid, tci, gas, etapas:[{t, valor}], fim, totalManual}
     monit: {}, equip: {}, labs: ['', '', '', '', '', '', '', '', ''],
     acesso: { perifNum: '', local: '', centralVia: '', interc: '', mpa: '' },
@@ -232,6 +254,7 @@ export function novaFicha(user) {
       aldrete: {}, // aldrete[tempo][criterio] = 0|1|2
       prescricao: [{ item: '', quant: '', horario: '' }, { item: '', quant: '', horario: '' }, { item: '', quant: '', horario: '' }],
       intercorrencias: '',
+      admDor: '', admDorEscala: 'Adulto', altaDor: '', altaDorEscala: 'Adulto',
       altaHora: '', altaPas: '', altaPad: '', altaFc: '', altaSpo2: '', encaminhado: '',
       medicoOutro: '', medicoNome: '', medicoCrm: '', // médico da SRPA quando não é o anestesista
     },
@@ -321,6 +344,9 @@ export function normalizarFicha(f) {
   f.pac.altura ??= '';
   f.pac.nascimento ??= '';
   f.infusoes ??= [];
+  f.transferencias ??= [];
+  f.srpa.admDor ??= ''; f.srpa.admDorEscala ??= 'Adulto'; f.srpa.altaDor ??= ''; f.srpa.altaDorEscala ??= 'Adulto';
+  if (f.srpa.encaminhado === 'APT') f.srpa.encaminhado = 'Leito';
   f.srpa.medicoOutro ??= ''; f.srpa.medicoNome ??= ''; f.srpa.medicoCrm ??= '';
   const p = f.pre;
   const base = novaPre();

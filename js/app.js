@@ -5,7 +5,7 @@ import {
   VIAS, UNIDADES, DROGAS_PADRAO, FLUIDOS, EVENTOS_RAPIDOS, MONITORIZACAO, EQUIPAMENTOS,
   PRE_GRUPOS, ALDRETE, ALDRETE_TEMPOS, novaFicha, uid, hhmm, dataBR, dataHoraBR, horaParaISO,
   calcBalanco, aldreteTotal, num, pad, N_MEDICAMENTOS, normalizarFicha, obrigatoriosFaltando,
-  INFUSOES, UNID_INFUSAO, imc, totalInfusao, rotuloInfusao, normNumero,
+  INFUSOES, UNID_INFUSAO, TEXTOS_PADRAO, imc, totalInfusao, rotuloInfusao, normNumero,
 } from './model.js';
 import { gerarPDF } from './pdf.js';
 
@@ -13,7 +13,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const APP_VERSAO = '1.2.2';
+const APP_VERSAO = '1.3.0';
 const DESENVOLVEDOR = 'Adriano A S Mendonça';
 
 // Rodando dentro do APK Android (Capacitor)?
@@ -674,7 +674,8 @@ function abaPaciente() {
       <label class="f">IMC (kg/m²)<span class="calc" data-calc="imc">${imc(f) ? num(imc(f)) : '–'}</span></label>
       ${inp('pac.jejum', 'Jejum (h)', { im: 'decimal' })}
       ${inp('pac.convenio', 'Convênio')}
-      ${inp('pac.matricula', 'Matrícula')}
+      ${inp('pac.matricula', 'Acomodação', { list: 'acomodacoes' })}
+      <datalist id="acomodacoes"><option value="Enfermaria"><option value="Apartamento"><option value="UTI"><option value="Ambulatório"></datalist>
     </div>
     ${linha('Sexo', chips('pac.sexo', [['F', 'Feminino'], ['M', 'Masculino']]))}
     ${linha('Caráter', chips('pac.carater', ['Eletivo', 'Urgência', 'Emergência']))}`)
@@ -690,6 +691,25 @@ function abaPaciente() {
   + card('Intervenção cirúrgica realizada', `<div class="grid g2">
       ${[0, 1, 2, 3, 4].map((i) => inp(`pac.intervencoes.${i}`, `${i + 1}.`)).join('')}</div>`);
 }
+
+// Quadro que abre e fecha (como os sistemas): fechado mostra "Negativo" ou quantos registros há.
+const quadroLista = (titulo, caminhoNeg, neg, n, corpo) => `<details class="card sis" data-lista ${n ? 'open' : ''}>
+    <summary><b>${titulo}</b><span class="sis-st">${n ? `${n} registrado(s)` : neg ? 'Negativo' : ''}</span></summary>
+    <label class="chk na"><input type="checkbox" data-f="${caminhoNeg}">Negativo</label>${corpo}</details>`;
+
+// Atualiza na hora o resumo ("Negativo" / "N marcado(s)") dos quadros que abrem e fecham.
+const atualizarResumoSis = (e) => {
+  const d = e.target.closest?.('details.sis');
+  if (!d) return;
+  const vazio = (i) => !i.value.trim();
+  const n = 'lista' in d.dataset
+    ? [...d.querySelectorAll('.grid')].filter((g) => [...g.querySelectorAll('input')].some((i) => !vazio(i))).length
+    : d.querySelectorAll('.checks input:checked').length + (d.querySelector('[data-f^="pre.outros."]')?.value.trim() ? 1 : 0);
+  const neg = d.querySelector('label.na input')?.checked;
+  d.querySelector('.sis-st').textContent = n ? `${n} ${'lista' in d.dataset ? 'registrado(s)' : 'marcado(s)'}` : neg ? 'Negativo' : '';
+};
+document.addEventListener('input', atualizarResumoSis);
+document.addEventListener('change', atualizarResumoSis);
 
 function abaPre() {
   const p = S.f.pre;
@@ -732,10 +752,10 @@ function abaPre() {
       ${linha('Familiar de problemas anestésicos', chips('pre.histFamiliar', SN))}`)
   + `</div></div>`
   + `<div class="cols2"><div>`
-  + card('Alergias', `<label class="chk na"><input type="checkbox" data-f="pre.alergiaNeg">Negativo</label>
-      ${[0, 1, 2].map((i) => `<div class="grid">${inp(`pre.alergias.${i}.agente`, `${i + 1}. Tipo / agente`)}${inp(`pre.alergias.${i}.reacao`, 'Reação')}</div>`).join('')}`)
-  + card('Cirurgia / anestesia prévia', `<label class="chk na"><input type="checkbox" data-f="pre.previaNeg">Negativo</label>
-      ${[0, 1, 2].map((i) => `<div class="grid">${inp(`pre.previas.${i}.cirurgia`, `${i + 1}. Cirurgia`)}${inp(`pre.previas.${i}.anestesia`, 'Anestesia')}${inp(`pre.previas.${i}.dados`, 'Dados relevantes', { cls: 'span2' })}</div>`).join('')}`)
+  + quadroLista('Alergias', 'pre.alergiaNeg', p.alergiaNeg, p.alergias.filter((a) => a.agente || a.reacao).length,
+      [0, 1, 2].map((i) => `<div class="grid">${inp(`pre.alergias.${i}.agente`, `${i + 1}. Tipo / agente`)}${inp(`pre.alergias.${i}.reacao`, 'Reação')}</div>`).join(''))
+  + quadroLista('Cirurgia / anestesia prévia', 'pre.previaNeg', p.previaNeg, p.previas.filter((a) => a.cirurgia || a.anestesia || a.dados).length,
+      [0, 1, 2].map((i) => `<div class="grid">${inp(`pre.previas.${i}.cirurgia`, `${i + 1}. Cirurgia`)}${inp(`pre.previas.${i}.anestesia`, 'Anestesia')}${inp(`pre.previas.${i}.dados`, 'Dados relevantes', { cls: 'span2' })}</div>`).join(''))
   + `</div><div>`
   + card('Medicação em uso', [...Array(N_MEDICAMENTOS).keys()].map((i) => `<div class="grid med">
       ${inp(`pre.medicamentos.${i}.nome`, `${i + 1}. Medicação`)}${inp(`pre.medicamentos.${i}.dose`, 'Dose diária')}
@@ -817,7 +837,9 @@ function abaTecnica() {
 function abaSrpa() {
   const vit = (p) => `<div class="grid">
       ${inp(`srpa.${p}Hora`, 'Hora', { type: 'time' })}${inp(`srpa.${p}Pas`, 'PAS', { im: 'numeric' })}${inp(`srpa.${p}Pad`, 'PAD', { im: 'numeric' })}
-      ${inp(`srpa.${p}Fc`, 'FC (bpm)', { im: 'numeric' })}${inp(`srpa.${p}Spo2`, 'SpO₂ (%)', { im: 'numeric' })}</div>`;
+      ${inp(`srpa.${p}Fc`, 'FC (bpm)', { im: 'numeric' })}${inp(`srpa.${p}Spo2`, 'SpO₂ (%)', { im: 'numeric' })}
+      ${inp(`srpa.${p}Dor`, 'Dor', { im: 'numeric', ph: '0–10' })}</div>
+      ${linha('Escala de dor', chips(`srpa.${p}DorEscala`, [['Adulto', 'Adulto 0–10'], ['Criança', 'Criança (faces) 0–5']]))}`;
   const ald = ALDRETE_TEMPOS.map(([tk, tl]) => `<details class="card ald-tempo" ${tk === 'entrada' ? 'open' : ''}>
       <summary><b>${tl}</b> — total: <span class="ald-tot" data-calc="ald:${tk}">${aldreteTotal(S.f, tk) === '' ? '–' : aldreteTotal(S.f, tk)}</span></summary>
       ${ALDRETE.map(([k, titulo, ops]) => `<div style="margin-top:10px"><div class="small muted">${titulo}</div>
@@ -832,7 +854,7 @@ function abaSrpa() {
   + card('Prescrição médica', [0, 1, 2].map((i) => `<div class="grid" style="margin-bottom:8px">
       ${inp(`srpa.prescricao.${i}.item`, `${i + 1}. Item`, { cls: 'span2' })}${inp(`srpa.prescricao.${i}.quant`, 'Quant.')}${inp(`srpa.prescricao.${i}.horario`, 'Horário')}</div>`).join(''))
   + card('Intercorrências', `<textarea data-f="srpa.intercorrencias" rows="3"></textarea>`)
-  + card('Alta da SRPA', vit('alta') + linha('Encaminhado', chips('srpa.encaminhado', ['APT', 'UTI', 'Residência'])));
+  + card('Alta da SRPA', vit('alta') + linha('Encaminhado', chips('srpa.encaminhado', ['Leito', 'UTI', 'Residência'])));
 }
 
 // ---------------------------------------------------------------- intraoperatório
@@ -851,6 +873,8 @@ function abaIntra() {
       <button class="btn" data-a="in"><span class="ic">⏳</span>Infusão / Gás</button>
       <button class="btn" data-a="fl"><span class="ic">💧</span>Fluido / sangue</button>
       <button class="btn" data-a="eo"><span class="ic">📝</span>Evento</button>
+      <button class="btn" data-a="tx"><span class="ic">🗒️</span>Texto pronto</button>
+      <button class="btn" data-a="tc"><span class="ic">🔄</span>Transferência de cuidados</button>
     </div><div class="alerta-sv" id="ultsv"></div></section>`}
     <section class="card" id="emcurso" hidden><h2>Infusões e gases em curso</h2><div class="tl" id="infs"></div></section>
     <section class="card"><h2>Situações especiais / observações</h2>
@@ -862,7 +886,7 @@ function abaIntra() {
 
 function iniciarIntra() {
   $$('[data-t]').forEach((b) => (b.onclick = () => marcarTempo(b.dataset.t)));
-  $$('[data-a]').forEach((b) => (b.onclick = () => ({ sv: dlgVitais, dr: dlgDroga, in: dlgInfusao, fl: dlgFluido, eo: dlgEvento })[b.dataset.a]()));
+  $$('[data-a]').forEach((b) => (b.onclick = () => ({ sv: dlgVitais, dr: dlgDroga, in: dlgInfusao, fl: dlgFluido, eo: dlgEvento, tx: dlgTextoPronto, tc: dlgTransferencia })[b.dataset.a]()));
   desenharIntra();
   const tick = () => {
     const r = $('#relogio');
@@ -902,6 +926,7 @@ function desenharIntra() {
     ...f.drogas.map((x) => ({ ...x, k: 'dr', txt: `${x.nome} ${num(x.dose)} ${x.unid} ${x.via}`, cat: 'Droga' })),
     ...f.fluidos.map((x) => ({ ...x, k: 'fl', txt: `${x.nome} ${x.vol} ml`, cat: x.tipo })),
     ...f.eventos.map((x) => ({ ...x, k: 'eo', txt: x.texto, cat: 'Evento' })),
+    ...f.transferencias.map((x) => ({ ...x, k: 'tc', txt: `para ${x.nome}${x.crm ? ` (CRM ${x.crm})` : ''}`, cat: 'Transferência de cuidados' })),
     ...f.infusoes.flatMap((x) => [
       ...x.etapas.map((e, i) => ({ id: x.id, t: e.t, k: 'in', cat: x.gas ? 'Gás' : x.tci ? 'Infusão TCI' : 'Infusão contínua',
         txt: `${x.nome} ${i ? '→ ' : ''}${num(e.valor)} ${x.tci || x.unid}${i ? '' : ' (início)'}` })),
@@ -913,11 +938,11 @@ function desenharIntra() {
       <span><span class="k">${esc(i.cat)}</span>${esc(i.txt)}</span>
       <span>${lock ? '' : `<button data-ed="${i.k}:${i.id}" aria-label="Editar">✏️</button><button data-del="${i.k}:${i.id}" aria-label="Excluir">🗑️</button>`}</span></div>`).join('')
     || '<p class="muted">Nada registrado ainda. Use os botões acima — o horário é preenchido automaticamente.</p>';
-  const col = { sv: 'vitais', dr: 'drogas', fl: 'fluidos', eo: 'eventos', in: 'infusoes' };
+  const col = { sv: 'vitais', dr: 'drogas', fl: 'fluidos', eo: 'eventos', in: 'infusoes', tc: 'transferencias' };
   $$('[data-ed]').forEach((b) => (b.onclick = () => {
     const [k, id] = b.dataset.ed.split(':');
     const item = S.f[col[k]].find((x) => x.id === id);
-    ({ sv: dlgVitais, dr: dlgDroga, fl: dlgFluido, eo: dlgEvento, in: dlgEditarInfusao })[k](item);
+    ({ sv: dlgVitais, dr: dlgDroga, fl: dlgFluido, eo: dlgEvento, in: dlgEditarInfusao, tc: dlgTransferencia })[k](item);
   }));
   $$('[data-del]').forEach((b) => (b.onclick = async () => {
     const [k, id] = b.dataset.del.split(':');
@@ -1152,12 +1177,19 @@ function salvarItem(colecao, item, dados) {
   desenharIntra();
 }
 
+// Horário sugerido: 1º registro = início da anestesia; depois, 10 min após o último registro.
+function horarioSugeridoVitais() {
+  const ult = [...S.f.vitais].sort((a, b) => (a.t > b.t ? -1 : 1))[0];
+  if (ult) return new Date(+new Date(ult.t) + 10 * 60000).toISOString();
+  return S.f.tempos.inicioAnest || null;
+}
+
 async function dlgVitais(item) {
   const ult = [...S.f.vitais].sort((a, b) => (a.t > b.t ? -1 : 1))[0] || {};
   const campos = [['pas', 'PAS'], ['pad', 'PAD'], ['fc', 'FC'], ['spo2', 'SpO₂ %'], ['etco2', 'EtCO₂'], ['temp', 'Temp °C']];
   const r = await modal({
     title: item ? 'Editar sinais vitais' : 'Sinais vitais',
-    body: `${campoHora(item?.t)}<br>
+    body: `${campoHora(item?.t || horarioSugeridoVitais())}<br>
       <div class="vit">${campos.map(([k, l], i) => `<label class="f">${l}<input type="text" inputmode="decimal" name="${k}" value="${esc(num(item?.[k] ?? ''))}" placeholder="${esc(item ? '' : num(ult[k] ?? ''))}" ${i === 0 ? 'autofocus' : ''} autocomplete="off"></label>`).join('')}</div><br>
       <label class="f">Ritmo (ECG)<input type="text" name="ritmo" list="ritmos" value="${esc(item?.ritmo ?? ult.ritmo ?? 'RS')}"></label>
       <datalist id="ritmos"><option value="RS"><option value="FA"><option value="Taqui sinusal"><option value="Bradi sinusal"><option value="Marca-passo"></datalist>
@@ -1236,6 +1268,52 @@ async function dlgFluido(item) {
   if (!nome) return toast('Escolha o fluido');
   salvarItem('fluidos', item, { t: horaParaISO(r.data.hora), nome, tipo: r.data.tipo, vol: normNum(r.data.vol) });
   toast(`${nome} ${r.data.vol} ml registrado`);
+}
+
+async function dlgTransferencia(item) {
+  const r = await modal({
+    title: item ? 'Editar transferência de cuidados' : 'Transferência de cuidados',
+    body: `<p class="small muted">Quando outro anestesista assume o paciente. Sai no PDF, em Anotações.</p>
+      <div class="grid">
+        <label class="f span2">Anestesista que assume<input type="text" name="nome" required value="${esc(item?.nome || '')}" autocomplete="off"></label>
+        <label class="f">CRM/UF<input type="text" name="crm" value="${esc(item?.crm || '')}" placeholder="ex.: 12345/SP" autocomplete="off"></label>
+        ${campoHora(item?.t)}
+      </div>`,
+  });
+  if (r.v !== 'ok') return;
+  salvarItem('transferencias', item, { t: horaParaISO(r.data.hora), nome: r.data.nome.trim(), crm: r.data.crm.trim() });
+  toast('Transferência de cuidados registrada');
+}
+
+const textosProntos = () => store.usuarioAtual()?.textos || TEXTOS_PADRAO;
+
+async function dlgTextoPronto() {
+  await modal({
+    title: 'Textos prontos',
+    body: `<p class="small muted">Toque para acrescentar às Situações especiais / Anotações. Edite a lista em Configurações.</p>
+      <input type="search" id="tbusca" placeholder="Buscar…" autocomplete="off">
+      <div class="tl" id="tlista" style="margin-top:10px"></div>`,
+    ok: 'Concluir', cancel: '',
+    onOpen: (d) => {
+      const desenhar = (q = '') => {
+        const n = q.toLowerCase();
+        $('#tlista', d).innerHTML = textosProntos().map((t, i) => [t, i]).filter(([t]) => t.toLowerCase().includes(n))
+          .map(([t, i]) => `<button type="button" class="ev eo" data-tx="${i}" style="text-align:left;width:100%;grid-template-columns:1fr auto;cursor:pointer">
+            <span>${esc(t)}</span><span class="k">＋</span></button>`).join('') || '<p class="muted small">Nenhum texto encontrado.</p>';
+        $$('[data-tx]', d).forEach((b) => (b.onclick = () => {
+          const t = textosProntos()[+b.dataset.tx];
+          S.f.anotacoes = [S.f.anotacoes?.trim(), t].filter(Boolean).join(' ');
+          const ta = $('[data-f="anotacoes"]');
+          if (ta) ta.value = S.f.anotacoes;
+          agendarSalvar();
+          b.style.opacity = '0.5';
+          toast('Texto acrescentado', 1500);
+        }));
+      };
+      desenhar();
+      $('#tbusca', d).oninput = (e) => desenhar(e.target.value);
+    },
+  });
 }
 
 async function dlgEvento(item) {
@@ -1373,7 +1451,7 @@ const SECOES = {
   pac: 'Paciente', pre: 'Pré-anestésica', tempos: 'Tempos', vitais: 'Sinais vitais', drogas: 'Drogas',
   fluidos: 'Fluidos', eventos: 'Eventos', monit: 'Monitorização', equip: 'Equipamentos', labs: 'Exames',
   acesso: 'Acesso venoso', anest: 'Anestesia', vent: 'Ventilação', balanco: 'Balanço hídrico',
-  saida: 'Encaminhamento', anotacoes: 'Situações especiais', srpa: 'SRPA', infusoes: 'Infusões',
+  saida: 'Encaminhamento', anotacoes: 'Situações especiais', srpa: 'SRPA', infusoes: 'Infusões', transferencias: 'Transferência de cuidados',
 };
 const rotuloCaminho = (k) => {
   const [s, ...resto] = k.split('.');
@@ -1529,6 +1607,10 @@ function telaConfig() {
       <div class="btns"><button class="btn pri" id="bbk">📤 Compartilhar backup</button><button class="btn" id="bbkd">💾 ${NATIVO ? 'Salvar' : 'Baixar'} backup</button>
       <button class="btn" id="brest">📥 Restaurar backup</button></div>
       <p class="small muted">Último backup: ${u.ultimoBackup ? dataHoraBR(u.ultimoBackup) : 'nunca'}</p>`)
+    + card('Textos prontos', `<p class="small muted">Frases curtas para acrescentar às Anotações no intraoperatório.</p>
+      <div class="tl" id="txlista">${textosProntos().map((t, i) => `<div class="ev eo"><span class="t">${i + 1}</span><span>${esc(t)}</span>
+        <span><button data-txe="${i}" aria-label="Editar">✏️</button><button data-txd="${i}" aria-label="Remover">🗑️</button></span></div>`).join('')}</div>
+      <div class="btns" style="margin-top:10px"><button class="btn" id="btxadd">＋ Adicionar</button><button class="btn" id="btxreset">Restaurar lista padrão</button></div>`)
     + card('Drogas favoritas', `<p class="small muted">Aparecem como atalho ao registrar drogas. “Ampola” é o conteúdo de 1 ampola na mesma unidade (usado para calcular a coluna Amp. do PDF).</p>
       <div class="tl" id="favlist">${favs.map((x, i) => `<div class="ev dr"><span class="t">${esc(x.via)}</span><span>${esc(x.nome)}<span class="k">${num(x.dose)} ${esc(x.unid)} · ampola ${x.amp ? num(x.amp) + ' ' + esc(x.unid) : '—'}</span></span>
         <span><button data-fe="${i}" aria-label="Editar">✏️</button><button data-fd="${i}" aria-label="Remover">🗑️</button></span></div>`).join('')}</div>
@@ -1599,6 +1681,21 @@ function telaConfig() {
   $$('[data-fe]').forEach((b) => (b.onclick = () => editarFav(+b.dataset.fe)));
   $$('[data-fd]').forEach((b) => (b.onclick = () => salvarFavs(favs.filter((_, i) => i !== +b.dataset.fd))));
   $('#bfadd').onclick = () => editarFav(-1);
+  const salvarTextos = async (lista) => { u.textos = lista; await store.salvarUsuario(); telaConfig(); };
+  const editarTexto = async (i) => {
+    const lista = [...textosProntos()];
+    const r = await modal({
+      title: i >= 0 ? 'Editar texto' : 'Novo texto',
+      body: `<label class="f">Texto (curto, para caber nas Anotações do PDF)<textarea name="t" rows="3" maxlength="200" required>${esc(i >= 0 ? lista[i] : '')}</textarea></label>`,
+    });
+    if (r.v !== 'ok' || !r.data.t.trim()) return;
+    if (i >= 0) lista[i] = r.data.t.trim(); else lista.push(r.data.t.trim());
+    salvarTextos(lista);
+  };
+  $$('[data-txe]').forEach((b) => (b.onclick = () => editarTexto(+b.dataset.txe)));
+  $$('[data-txd]').forEach((b) => (b.onclick = () => salvarTextos(textosProntos().filter((_, i) => i !== +b.dataset.txd))));
+  $('#btxadd').onclick = () => editarTexto(-1);
+  $('#btxreset').onclick = async () => { if (await confirmar('Lista padrão', 'Substituir seus textos pela lista padrão?')) salvarTextos(null); };
   $('#bfreset').onclick = async () => { if (await confirmar('Lista padrão', 'Substituir seus favoritos pela lista padrão?')) salvarFavs(null); };
   $('#btrocalic')?.addEventListener('click', async () => {
     if (!(await confirmar('Trocar código', 'Remover o código de acesso atual e digitar outro?'))) return;
