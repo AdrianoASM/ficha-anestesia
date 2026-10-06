@@ -1,5 +1,6 @@
 import * as store from './store.js';
 import * as licenca from './licenca.js';
+import { TRAVA, EDICAO } from './config.js';
 import {
   VIAS, UNIDADES, DROGAS_PADRAO, FLUIDOS, EVENTOS_RAPIDOS, MONITORIZACAO, EQUIPAMENTOS,
   PRE_GRUPOS, ALDRETE, ALDRETE_TEMPOS, novaFicha, uid, hhmm, dataBR, dataHoraBR, horaParaISO,
@@ -12,7 +13,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const APP_VERSAO = '1.2.1';
+const APP_VERSAO = '1.2.2';
 const DESENVOLVEDOR = 'Adriano A S Mendonça';
 
 // Rodando dentro do APK Android (Capacitor)?
@@ -203,7 +204,7 @@ async function render() {
   clearInterval(S.timer);
   if (S.wake) { S.wake.release().catch(() => {}); S.wake = null; }
   await salvarAgora();
-  if (!(await acessoLiberado())) return telaLicenca();
+  if (TRAVA && !(await acessoLiberado())) return telaLicenca();
   const user = store.usuarioAtual();
   $('#tabs').hidden = true;
   if (!user) return telaLogin();
@@ -1532,12 +1533,12 @@ function telaConfig() {
       <div class="tl" id="favlist">${favs.map((x, i) => `<div class="ev dr"><span class="t">${esc(x.via)}</span><span>${esc(x.nome)}<span class="k">${num(x.dose)} ${esc(x.unid)} · ampola ${x.amp ? num(x.amp) + ' ' + esc(x.unid) : '—'}</span></span>
         <span><button data-fe="${i}" aria-label="Editar">✏️</button><button data-fd="${i}" aria-label="Remover">🗑️</button></span></div>`).join('')}</div>
       <div class="btns" style="margin-top:10px"><button class="btn" id="bfadd">＋ Adicionar</button><button class="btn" id="bfreset">Restaurar lista padrão</button></div>`)
-    + card('Acesso ao app', `<p>Liberado para <b>${esc(S.licenca?.n || '')}</b> · ${S.licenca?.e ? `válido até <b>${dataBR(S.licenca.e)}</b>` : '<b>sem validade</b>'}</p>
-      <button class="btn" id="btrocalic">Trocar código de acesso</button>`)
+    + (!TRAVA ? '' : card('Acesso ao app', `<p>Liberado para <b>${esc(S.licenca?.n || '')}</b> · ${S.licenca?.e ? `válido até <b>${dataBR(S.licenca.e)}</b>` : '<b>sem validade</b>'}</p>
+      <button class="btn" id="btrocalic">Trocar código de acesso</button>`))
     + card('Sessão', `<button class="btn bad" id="bsair">Sair</button>`)
     + card('Sobre', `<div style="display:flex;gap:14px;align-items:center">
         <img src="icons/logo.png" alt="" width="64" height="64" style="border-radius:12px;background:#fff">
-        <div><b>Ficha de Anestesia</b> — versão ${APP_VERSAO} (${NATIVO ? 'app Android' : 'versão web'})<br>
+        <div><b>Ficha de Anestesia</b> — versão ${APP_VERSAO}${TRAVA ? '' : ' · uso pessoal'} (${NATIVO ? 'app Android' : 'versão web'})<br>
         Desenvolvido por <b>${DESENVOLVEDOR}</b><br>
         <span class="small muted">CEA — Excelência em Anestesia · fichas guardadas criptografadas neste aparelho</span></div></div>`);
 
@@ -1599,10 +1600,10 @@ function telaConfig() {
   $$('[data-fd]').forEach((b) => (b.onclick = () => salvarFavs(favs.filter((_, i) => i !== +b.dataset.fd))));
   $('#bfadd').onclick = () => editarFav(-1);
   $('#bfreset').onclick = async () => { if (await confirmar('Lista padrão', 'Substituir seus favoritos pela lista padrão?')) salvarFavs(null); };
-  $('#btrocalic').onclick = async () => {
+  $('#btrocalic')?.addEventListener('click', async () => {
     if (!(await confirmar('Trocar código', 'Remover o código de acesso atual e digitar outro?'))) return;
     licenca.remover(); S.motivoLicenca = ''; render();
-  };
+  });
   $('#bsair').onclick = () => { store.sair(); S.fichas = []; go('#/'); };
 }
 
@@ -1801,6 +1802,6 @@ if (!NATIVO && 'serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 render();
-licenca.atualizarBloqueios().then(async () => {
+if (TRAVA) licenca.atualizarBloqueios().then(async () => {
   if (S.licenca && !(await licenca.verificar(licenca.codigoSalvo())).ok) render();
 });
