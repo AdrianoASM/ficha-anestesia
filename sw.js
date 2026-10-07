@@ -1,8 +1,8 @@
 // Service worker: guarda os arquivos do app para funcionar sem internet.
-const CACHE = 'ficha-anestesia-v17';
+const CACHE = 'ficha-anestesia-v18';
 const ARQUIVOS = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
-  'js/app.js', 'js/model.js', 'js/store.js', 'js/pdf.js', 'js/licenca.js', 'js/config.js',
+  'js/app.js', 'js/model.js', 'js/store.js', 'js/pdf.js', 'js/licenca.js', 'js/config.js', 'js/planilha.js',
   'lib/jspdf.umd.min.js', 'icons/logo.png', 'icons/icon-192.png', 'icons/icon-512.png',
 ];
 

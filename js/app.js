@@ -1,6 +1,7 @@
 import * as store from './store.js';
 import * as licenca from './licenca.js';
-import { TRAVA, EDICAO } from './config.js';
+import { TRAVA, EDICAO, PLANILHA } from './config.js';
+import * as planilha from './planilha.js';
 import {
   VIAS, UNIDADES, DROGAS_PADRAO, FLUIDOS, EVENTOS_RAPIDOS, MONITORIZACAO, EQUIPAMENTOS,
   PRE_GRUPOS, ALDRETE, ALDRETE_TEMPOS, novaFicha, uid, hhmm, dataBR, dataHoraBR, horaParaISO,
@@ -13,7 +14,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const APP_VERSAO = '1.3.0';
+const APP_VERSAO = '1.3.1';
 const DESENVOLVEDOR = 'Adriano A S Mendonça';
 
 // Rodando dentro do APK Android (Capacitor)?
@@ -1402,6 +1403,7 @@ function ligarFim() {
     toast('Ficha finalizada');
     await acaoPdf('baixar');
     if (NATIVO) backupAutomatico();
+    atualizarPlanilha(f);
   });
   $('#bdel')?.addEventListener('click', async () => {
     if (!(await confirmar('Excluir rascunho', 'Excluir definitivamente esta ficha em andamento?', 'Excluir', 'bad'))) return;
@@ -1432,6 +1434,7 @@ function ligarFim() {
     await salvarAgora();
     telaFicha();
     toast('Revisão concluída');
+    atualizarPlanilha(f);
   });
   $('#bdesc')?.addEventListener('click', async () => {
     if (!(await confirmar('Descartar alterações', 'Voltar a ficha ao estado em que estava antes da edição?', 'Descartar', 'bad'))) return;
@@ -1608,6 +1611,13 @@ function telaConfig() {
       <form id="finst" class="grid" style="margin-top:12px">
         <label class="f full">Instituição / grupo (opcional)<input type="text" name="instituicao" value="${esc(u.instituicao || '')}" placeholder="ex.: Serviço de Anestesiologia do Hospital X"></label>
         <div class="full"><button class="btn">Salvar instituição</button></div></form>`)
+    + (!PLANILHA ? '' : card('Planilha de anestesias (.xlsx)', `
+      <p class="small muted">Ao finalizar uma ficha, a planilha do ano (ex.: <b>Anestesias ${new Date().getFullYear()}.xlsx</b>) é atualizada
+        ${NATIVO ? 'na pasta <b>Fichas</b> do local escolhido' : ''}: uma linha por ficha finalizada.</p>
+      <form id="fplan" class="grid">
+        <label class="f">Minhas iniciais na planilha<input type="text" name="iniciais" value="${esc(iniciaisAnest())}" maxlength="6" autocomplete="off"></label>
+        <label class="f">Ano<select name="ano">${anosPlanilha().map((a) => `<option>${a}</option>`).join('')}</select></label>
+        <div class="full btns"><button class="btn pri">📊 Gerar planilha agora</button></div></form>`))
     + (NATIVO ? cardArmazenamento() + cardSync() : '')
     + card('Senha', `<div class="btns"><button class="btn" id="bsenha">Trocar senha</button></div>`)
     + card('Backup', `<p class="small">O backup contém suas fichas <b>criptografadas</b>: só abre com a sua senha ou o código de recuperação.
@@ -1650,6 +1660,12 @@ function telaConfig() {
     u.instituicao = e.target.instituicao.value.trim();
     await store.salvarUsuario(); toast('Instituição salva'); telaConfig();
   };
+  $('#fplan')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const ini = e.target.iniciais.value.trim().toUpperCase();
+    if (ini !== (u.iniciais || '')) { u.iniciais = ini; await store.salvarUsuario(); }
+    await salvarPlanilha(e.target.ano.value, { avisar: true });
+  });
   $('#bsenha').onclick = async () => {
     const r = await modal({
       title: 'Trocar senha',
@@ -1915,6 +1931,36 @@ function escolherLogo() {
     } catch (e) { toast('Não foi possível usar essa imagem: ' + e.message, 5000); }
   };
   i.click();
+}
+
+// ----- planilha anual (.xlsx) — edição de uso pessoal
+const iniciaisAnest = () => store.usuarioAtual()?.iniciais || planilha.iniciais(store.usuarioAtual()?.nome, 2);
+const anosPlanilha = () => {
+  const anos = planilha.anosComFichas(S.fichas);
+  return anos.length ? anos : [String(new Date().getFullYear())];
+};
+
+async function salvarPlanilha(ano, { avisar = false } = {}) {
+  try {
+    const blob = planilha.gerarPlanilha(await store.listarFichas(), ano, iniciaisAnest());
+    const nome = planilha.nomePlanilha(ano);
+    if (NATIVO) return await salvarNativo(blob, nome, planilha.MIME_XLSX, 'Fichas', { silencioso: !avisar });
+    baixar(blob, nome);
+    if (avisar) toast(`Salvo: ${nome}`);
+    return true;
+  } catch (e) {
+    console.error(e);
+    toast('Planilha não atualizada: ' + e.message, 6000);
+    return false;
+  }
+}
+
+// Depois de finalizar (ou concluir uma revisão): refaz a planilha do ano da ficha na pasta configurada.
+async function atualizarPlanilha(f) {
+  if (!PLANILHA || !NATIVO) return;
+  const a = armazenamento();
+  if (!(a.modo === 'pasta' && a.uri)) return;
+  if (await salvarPlanilha((f.pac.data || new Date().toISOString()).slice(0, 4))) toast('Planilha de anestesias atualizada', 2500);
 }
 
 function restaurarBackup() {
