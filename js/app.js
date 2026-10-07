@@ -24,7 +24,7 @@ const Arquivos = NATIVO
   ? new Proxy({}, { get: (_, metodo) => (opcoes = {}) => window.Capacitor.nativePromise('Arquivos', metodo, opcoes) })
   : null;
 
-const S = { fichas: [], f: null, aba: 'pac', logo: null, timer: null, wake: null, filtro: '' };
+const S = { fichas: [], f: null, aba: 'pac', timer: null, wake: null, filtro: '' };
 
 const ABAS = [
   ['pac', '👤', 'Paciente'], ['pre', '📋', 'Pré-anest.'], ['intra', '⏱️', 'Intraop.'],
@@ -1482,11 +1482,9 @@ function diferencas(a, b) {
   return out.slice(0, 80);
 }
 
+// Logo do cabeçalho do PDF: o escolhido pelo usuário em Configurações (sem logo, só o título).
 async function carregarLogo() {
-  if (S.logo) return S.logo;
-  const blob = await (await fetch('icons/logo.png')).blob();
-  S.logo = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
-  return S.logo;
+  return store.usuarioAtual()?.logo || null;
 }
 
 function nomeArquivo(f) {
@@ -1568,7 +1566,7 @@ async function acaoPdf(modo) {
   await salvarAgora();
   toast('Gerando PDF…', 1500);
   try {
-    const blob = await gerarPDF(S.f, { favoritos: favoritos(), logo: await carregarLogo() });
+    const blob = await gerarPDF(S.f, { favoritos: favoritos(), logo: await carregarLogo(), instituicao: store.usuarioAtual()?.instituicao || '' });
     const nome = nomeArquivo(S.f);
     if (NATIVO) {
       if (modo === 'baixar') return salvarNativo(blob, nome, 'application/pdf', 'Fichas');
@@ -1600,6 +1598,16 @@ function telaConfig() {
       <label class="f">UF<input type="text" name="uf" value="${esc(u.uf)}" maxlength="2" required></label>
       <div class="full"><button class="btn pri">Salvar dados</button></div></form>
       <p class="small muted">Vale para as próximas fichas. As já criadas mantêm o nome e CRM de quando foram feitas.</p>`)
+    + card('Cabeçalho da ficha (logo e instituição)', `
+      <p class="small muted">Aparecem no topo do PDF.</p>
+      <div style="display:flex;gap:14px;align-items:center;margin-bottom:10px">
+        ${u.logo ? `<img src="${u.logo}" alt="Logo" style="max-width:96px;max-height:96px;border-radius:10px;background:#fff;border:1px solid var(--line)">` : '<span class="muted small">Nenhum logo escolhido.</span>'}
+      </div>
+      <div class="btns"><button class="btn pri" id="blogo">🖼️ ${u.logo ? 'Trocar logo' : 'Escolher logo'}</button>
+        ${u.logo ? '<button class="btn bad" id="blogorem">Remover logo</button>' : ''}</div>
+      <form id="finst" class="grid" style="margin-top:12px">
+        <label class="f full">Instituição / grupo (opcional)<input type="text" name="instituicao" value="${esc(u.instituicao || '')}" placeholder="ex.: Serviço de Anestesiologia do Hospital X"></label>
+        <div class="full"><button class="btn">Salvar instituição</button></div></form>`)
     + (NATIVO ? cardArmazenamento() + cardSync() : '')
     + card('Senha', `<div class="btns"><button class="btn" id="bsenha">Trocar senha</button></div>`)
     + card('Backup', `<p class="small">O backup contém suas fichas <b>criptografadas</b>: só abre com a sua senha ou o código de recuperação.
@@ -1631,6 +1639,16 @@ function telaConfig() {
     await store.salvarUsuario();
     toast('Dados salvos');
     telaConfig();
+  };
+  $('#blogo').onclick = () => escolherLogo();
+  $('#blogorem')?.addEventListener('click', async () => {
+    if (!(await confirmar('Remover logo', 'Remover o logo do cabeçalho da ficha?'))) return;
+    delete u.logo; await store.salvarUsuario(); telaConfig();
+  });
+  $('#finst').onsubmit = async (e) => {
+    e.preventDefault();
+    u.instituicao = e.target.instituicao.value.trim();
+    await store.salvarUsuario(); toast('Instituição salva'); telaConfig();
   };
   $('#bsenha').onclick = async () => {
     const r = await modal({
@@ -1872,6 +1890,31 @@ function ligarArmazenamento() {
   };
   $$('#modoArm button').forEach((b) => (b.onclick = () => salvar({ modo: b.dataset.v })));
   $('#bkauto').onchange = (e) => salvar({ backupAuto: e.target.checked });
+}
+
+// Logo: imagem da galeria, reduzida (máx. 400 px) e guardada no cadastro.
+function escolherLogo() {
+  const i = document.createElement('input');
+  i.type = 'file';
+  i.accept = 'image/*';
+  i.onchange = async () => {
+    const arq = i.files[0];
+    if (!arq) return;
+    try {
+      const url = await new Promise((ok, erro) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = erro; fr.readAsDataURL(arq); });
+      const img = await new Promise((ok, erro) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => erro(new Error('imagem inválida')); im.src = url; });
+      const k = Math.min(1, 400 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const u = store.usuarioAtual();
+      u.logo = arq.type === 'image/png' ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.9);
+      await store.salvarUsuario();
+      toast('Logo salvo');
+      telaConfig();
+    } catch (e) { toast('Não foi possível usar essa imagem: ' + e.message, 5000); }
+  };
+  i.click();
 }
 
 function restaurarBackup() {

@@ -11,10 +11,11 @@ const JANELA = 4 * 60 * MIN; // cada página do gráfico cobre 4 horas
 const G = { x0: 30, x1: 166, cols: 48 }; // grade de tempo: 48 colunas de 5 min
 G.cw = (G.x1 - G.x0) / G.cols;
 
-export async function gerarPDF(f, { favoritos, logo } = {}) {
+export async function gerarPDF(f, { favoritos, logo, instituicao = '' } = {}) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const P = pen(doc);
+  P.instituicao = instituicao;
 
   const janelas = calcJanelas(f);
   const linhas = linhasAgentes(f);
@@ -173,8 +174,18 @@ function eventosNumerados(f) {
 
 // ---------- página 1 ----------
 function titulo(P, texto, logo) {
-  P.t(texto, 99, 16, { size: 15, bold: true, align: 'center' });
-  if (logo) P.doc.addImage(logo, 'PNG', 181, 4, 16, 16);
+  P.t(texto, 99, P.instituicao ? 14 : 16, { size: 15, bold: true, align: 'center' });
+  if (P.instituicao) P.t(P.instituicao, 99, 20, { size: 8.5, align: 'center', maxW: 150 });
+  if (logo) {
+    // cabe numa caixa de 22 x 16 mm, mantendo a proporção
+    try {
+      const fmt = logo.startsWith('data:image/jpeg') ? 'JPEG' : 'PNG';
+      const { width, height } = P.doc.getImageProperties(logo);
+      const k = Math.min(22 / width, 16 / height);
+      const w = width * k, h = height * k;
+      P.doc.addImage(logo, fmt, 199 - w, 4 + (16 - h) / 2, w, h);
+    } catch { /* imagem inválida: segue sem logo */ }
+  }
 }
 
 function pagina1(P, f, logo, favoritos) {
