@@ -1343,6 +1343,7 @@ async function dlgEventos() {
         <button type="button" class="btn" id="evadd" aria-label="Acrescentar evento">＋</button></div>
       <div id="evsel" style="margin-top:12px"></div>`,
     onOpen: (d) => {
+      d.classList.add('topo');
       const lista = $('#evsel', d);
       const linhas = () => $$('.evlin', lista);
       const atualizarVazio = () => {
@@ -1373,6 +1374,7 @@ async function dlgEventos() {
       atualizarVazio();
     },
   });
+  r.el.classList.remove('topo');
   if (r.v !== 'ok') return;
   const novos = Object.keys(r.data).filter((k) => k.startsWith('t_')).map((k) => k.slice(2))
     .map((i) => ({ texto: String(r.data[`t_${i}`]).trim(), hora: r.data[`h_${i}`] })).filter((e) => e.texto);

@@ -206,6 +206,8 @@ dialog {
   max-height: calc(100vh - 30px); background: var(--card); color: var(--text);
   box-shadow: 0 20px 60px rgba(0,0,0,.35);
 }
+/* janela presa no alto: cresce para baixo sem deslocar os botões já na tela */
+dialog.topo { margin-top: 12px; margin-bottom: auto; }
 dialog::backdrop { background: rgba(10, 20, 30, .55); }
 dialog form { display: flex; flex-direction: column; max-height: calc(100vh - 30px); }
 dialog .mh { padding: 14px 16px; border-bottom: 1px solid var(--line); font-weight: 700; font-size: 17px; }
