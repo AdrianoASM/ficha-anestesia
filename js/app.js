@@ -1318,16 +1318,69 @@ async function dlgTextoPronto() {
 }
 
 async function dlgEvento(item) {
+  if (!item) return dlgEventos();
   const r = await modal({
-    title: item ? 'Editar evento' : 'Evento',
+    title: 'Editar evento',
     body: `<div class="chips" id="evr" style="margin-bottom:10px">${EVENTOS_RAPIDOS.map((e) => `<button type="button">${esc(e)}</button>`).join('')}</div>
-      <label class="f">Descrição<input type="text" name="texto" required value="${esc(item?.texto || '')}" autocomplete="off"></label><br>
-      ${campoHora(item?.t)}`,
+      <label class="f">Descrição<input type="text" name="texto" required value="${esc(item.texto || '')}" autocomplete="off"></label><br>
+      ${campoHora(item.t)}`,
     onOpen: (d) => $$('#evr button', d).forEach((b) => (b.onclick = () => { $('form', d).texto.value = b.textContent; })),
   });
   if (r.v !== 'ok') return;
   salvarItem('eventos', item, { t: horaParaISO(r.data.hora), texto: r.data.texto.trim() });
   toast('Evento registrado');
+}
+
+// Vários eventos de uma vez: cada um escolhido vira uma linha com o seu horário (editável).
+async function dlgEventos() {
+  let n = 0;
+  const r = await modal({
+    title: 'Eventos',
+    body: `<p class="small muted">Toque em um ou mais eventos (toque de novo para tirar). Ajuste o horário de cada um se precisar.</p>
+      <div class="chips" id="evr" style="margin-bottom:10px">${EVENTOS_RAPIDOS.map((e) => `<button type="button" aria-pressed="false">${esc(e)}</button>`).join('')}</div>
+      <div style="display:flex;gap:8px;align-items:flex-end">
+        <label class="f" style="flex:1">Outro evento<input type="text" id="evoutro" name="evoutro" autocomplete="off" placeholder="digite e toque em ＋"></label>
+        <button type="button" class="btn" id="evadd" aria-label="Acrescentar evento">＋</button></div>
+      <div id="evsel" style="margin-top:12px"></div>`,
+    onOpen: (d) => {
+      const lista = $('#evsel', d);
+      const linhas = () => $$('.evlin', lista);
+      const atualizarVazio = () => {
+        $('#evvazio', d)?.remove();
+        if (!linhas().length) lista.insertAdjacentHTML('beforeend', '<p class="muted small" id="evvazio">Nenhum evento escolhido.</p>');
+      };
+      const acrescentar = (texto, chip) => {
+        const i = n++;
+        lista.insertAdjacentHTML('beforeend', `<div class="evlin" data-i="${i}" style="display:grid;grid-template-columns:1fr 7.5em auto;gap:8px;align-items:end;margin-bottom:8px">
+          <label class="f">Evento<input type="text" name="t_${i}" value="${esc(texto)}" required autocomplete="off"></label>
+          <label class="f">Horário<input type="time" name="h_${i}" value="${agoraHM()}" required></label>
+          <button type="button" class="btn" data-rem="${i}" aria-label="Tirar">✕</button></div>`);
+        const lin = $(`.evlin[data-i="${i}"]`, lista);
+        lin.chip = chip;
+        $('[data-rem]', lin).onclick = () => { if (lin.chip) lin.chip.setAttribute('aria-pressed', 'false'); lin.remove(); atualizarVazio(); };
+        atualizarVazio();
+      };
+      $$('#evr button', d).forEach((b) => (b.onclick = () => {
+        const lin = linhas().find((l) => l.chip === b);
+        if (lin) { lin.remove(); b.setAttribute('aria-pressed', 'false'); atualizarVazio(); return; }
+        b.setAttribute('aria-pressed', 'true');
+        acrescentar(b.textContent, b);
+      }));
+      const outro = $('#evoutro', d);
+      const addOutro = () => { const t = outro.value.trim(); if (t) { acrescentar(t, null); outro.value = ''; } outro.focus(); };
+      $('#evadd', d).onclick = addOutro;
+      outro.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); addOutro(); } };
+      atualizarVazio();
+    },
+  });
+  if (r.v !== 'ok') return;
+  const novos = Object.keys(r.data).filter((k) => k.startsWith('t_')).map((k) => k.slice(2))
+    .map((i) => ({ texto: String(r.data[`t_${i}`]).trim(), hora: r.data[`h_${i}`] })).filter((e) => e.texto);
+  const pendente = String(r.data.evoutro || '').trim();
+  if (pendente) novos.push({ texto: pendente, hora: agoraHM() });
+  if (!novos.length) return toast('Nenhum evento escolhido');
+  for (const e of novos) salvarItem('eventos', null, { t: horaParaISO(e.hora), texto: e.texto });
+  toast(novos.length === 1 ? 'Evento registrado' : `${novos.length} eventos registrados`);
 }
 
 // ---------------------------------------------------------------- finalizar / PDF
