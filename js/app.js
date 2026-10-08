@@ -14,7 +14,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const APP_VERSAO = '1.3.3';
+const APP_VERSAO = '1.3.4';
 const DESENVOLVEDOR = 'Adriano A S Mendonça';
 
 // Rodando dentro do APK Android (Capacitor)?
@@ -1589,7 +1589,7 @@ function blobBase64(blob) {
 }
 
 // Salva no destino configurado; se não houver pasta (ou ela ficou inacessível), abre "Salvar em".
-async function salvarNativo(blob, nome, mime, subpasta, { silencioso = false } = {}) {
+async function salvarNativo(blob, nome, mime, subpasta, { silencioso = false, rotulo = 'Backup automático' } = {}) {
   const a = armazenamento();
   const base64 = await blobBase64(blob);
   if (a.modo === 'pasta' && a.uri) {
@@ -1598,7 +1598,7 @@ async function salvarNativo(blob, nome, mime, subpasta, { silencioso = false } =
       if (!silencioso) toast(`Salvo em ${a.nome}/${subpasta}: ${nome}`, 3500);
       return true;
     } catch (e) {
-      if (silencioso) { toast('Backup automático falhou: ' + e.message, 5000); return false; }
+      if (silencioso) { toast(`${rotulo} falhou: ${e.message}`, 6000); return false; }
       toast(e.message + ' Escolha onde salvar agora.', 5000);
     }
   }
@@ -1668,7 +1668,10 @@ function telaConfig() {
         <div class="full"><button class="btn">Salvar instituição</button></div></form>`)
     + (!PLANILHA ? '' : card('Planilha de anestesias (.xlsx)', `
       <p class="small muted">Ao finalizar uma ficha, a planilha do ano (ex.: <b>Anestesias ${new Date().getFullYear()}.xlsx</b>) é atualizada
-        ${NATIVO ? 'na pasta <b>Fichas</b> do local escolhido' : ''}: uma linha por ficha finalizada.</p>
+        ${NATIVO ? 'na pasta <b>Fichas</b> do local escolhido' : ''}: uma linha por ficha finalizada (todas as fichas finalizadas do ano que estão neste aparelho).</p>
+      ${!NATIVO ? '' : armazenamento().modo === 'pasta' && armazenamento().uri
+        ? (u.planilha ? `<p class="small">Última atualização: <b>${dataHoraBR(u.planilha.em)}</b> em <b>${esc(u.planilha.local)}</b></p>` : '')
+        : '<p class="small" style="color:var(--bad)">Sem pasta fixa: a atualização automática está desligada. Escolha a pasta abaixo e marque “Salvar automaticamente na pasta”.</p>'}
       <form id="fplan" class="grid">
         <label class="f">Minhas iniciais na planilha<input type="text" name="iniciais" value="${esc(iniciaisAnest())}" maxlength="6" autocomplete="off"></label>
         <label class="f">Ano<select name="ano">${anosPlanilha().map((a) => `<option>${a}</option>`).join('')}</select></label>
@@ -1999,7 +2002,16 @@ async function salvarPlanilha(ano, { avisar = false } = {}) {
   try {
     const blob = planilha.gerarPlanilha(await store.listarFichas(), ano, iniciaisAnest());
     const nome = planilha.nomePlanilha(ano);
-    if (NATIVO) return await salvarNativo(blob, nome, planilha.MIME_XLSX, 'Fichas', { silencioso: !avisar });
+    if (NATIVO) {
+      const a = armazenamento();
+      const ok = await salvarNativo(blob, nome, planilha.MIME_XLSX, 'Fichas', { silencioso: !avisar, rotulo: 'Planilha de anestesias' });
+      if (ok && a.modo === 'pasta' && a.uri) {
+        const u = store.usuarioAtual();
+        u.planilha = { em: new Date().toISOString(), local: `${a.provedor ? a.provedor + ' › ' : ''}${a.nome}/Fichas/${nome}` };
+        await store.salvarUsuario();
+      }
+      return ok;
+    }
     baixar(blob, nome);
     if (avisar) toast(`Salvo: ${nome}`);
     return true;
@@ -2014,7 +2026,9 @@ async function salvarPlanilha(ano, { avisar = false } = {}) {
 async function atualizarPlanilha(f) {
   if (!PLANILHA || !NATIVO) return;
   const a = armazenamento();
-  if (!(a.modo === 'pasta' && a.uri)) return;
+  if (!(a.modo === 'pasta' && a.uri)) {
+    return toast('Planilha não atualizada: em ⚙️ Configurações escolha uma pasta e “Salvar automaticamente na pasta”.', 7000);
+  }
   if (await salvarPlanilha((f.pac.data || new Date().toISOString()).slice(0, 4))) toast('Planilha de anestesias atualizada', 2500);
 }
 
