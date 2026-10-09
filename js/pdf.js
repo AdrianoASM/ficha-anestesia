@@ -5,6 +5,16 @@ import {
 } from './model.js';
 
 const INK = [18, 45, 130]; // cor do "preenchimento" (dados), como caneta azul
+// Cores do gráfico e das linhas contínuas (as mesmas da linha do tempo no app)
+const COR = {
+  pa: [31, 79, 184], // PAS ▼ / PAD ▲ — azul
+  fc: [192, 57, 43], // FC ● — vermelho
+  infusao: [142, 68, 173], // drogas em infusão contínua / TCI — roxo
+  gas: [29, 122, 74], // O₂, ar, N₂O, halogenados — verde
+  soro: [14, 143, 168], // cristaloides e coloides — azul-turquesa
+  sangue: [155, 28, 49], // hemoderivados — vinho
+  evento: [211, 84, 0], // eventos numerados — laranja
+};
 const GRAY = [225, 225, 225];
 const MIN = 60000;
 const JANELA = 4 * 60 * MIN; // cada página do gráfico cobre 4 horas
@@ -66,7 +76,7 @@ function pen(doc) {
       P.color();
       return P;
     },
-    v(s, x, y, o = {}) { return P.t(s, x, y, { size: 8.6, ...o, ink: true }); },
+    v(s, x, y, o = {}) { return P.t(s, x, y, { size: 8.6, ...o, ink: !o.color }); },
     line(x1, y1, x2, y2, w = 0.2) { doc.setLineWidth(w); doc.setDrawColor(0); doc.line(x1, y1, x2, y2); return P; },
     rect(x, y, w, h, o = {}) {
       doc.setLineWidth(o.lw ?? 0.3);
@@ -275,9 +285,9 @@ function vGradeTempo(P, y1, y2) {
 }
 
 // Linha em zig-zag (infusão contínua / gás em curso).
-function zigzag(doc, x1, x2, yc) {
+function zigzag(doc, x1, x2, yc, cor = INK) {
   if (x2 - x1 < 0.4) return;
-  doc.setDrawColor(...INK);
+  doc.setDrawColor(...cor);
   doc.setLineWidth(0.22);
   const passo = 0.6, amp = 0.55;
   let x = x1, yAnt = yc, cima = true;
@@ -345,16 +355,17 @@ function gradeAgentes(P, f, inicio, linhas, primeira, favoritos) {
       const tAte = inf.fim ? +new Date(inf.fim) : tFim;
       const xa = Math.max(G.x0, xt(tIni)), xb = Math.min(G.x1, xt(tAte));
       const yc = top + rh * 0.72;
+      const cor = inf.gas ? COR.gas : COR.infusao;
       if (xb > G.x0 && xa < G.x1) {
-        zigzag(doc, xa, xb, yc);
-        doc.setDrawColor(...INK); doc.setLineWidth(0.3);
+        zigzag(doc, xa, xb, yc, cor);
+        doc.setDrawColor(...cor); doc.setLineWidth(0.3);
         inf.etapas.forEach((e, k) => {
           const xe = xt(e.t);
           if (xe < G.x0 - 0.01 || xe > G.x1) return;
           doc.line(xe, yc - 0.9, xe, yc + 0.9);
           const txt = num(e.valor) + (k === 0 ? ` ${inf.tci || inf.unid}` : '');
-          P.v(txt, xe + 0.3, top + 1.75, { size: 4.6 });
-          doc.setDrawColor(...INK);
+          P.v(txt, xe + 0.3, top + 1.75, { size: 4.6, color: cor });
+          doc.setDrawColor(...cor);
         });
         if (inf.fim && xt(inf.fim) <= G.x1) { doc.setLineWidth(0.45); doc.line(xb, yc - 1.1, xb, yc + 1.1); }
         doc.setDrawColor(0);
@@ -364,6 +375,31 @@ function gradeAgentes(P, f, inicio, linhas, primeira, favoritos) {
       const t = totalInfusao(inf, f.pac.peso, tFim);
       if (t) P.v(`${num(t.valor)} ${t.unid}`, 171.8, y, { size: 5.4, align: 'center', maxW: 11.4 });
       else if (inf.gas) P.v(inf.unid, 171.8, y, { size: 5.4, align: 'center' });
+    }
+  });
+}
+
+// Soro em linha contínua: cada frasco vai do seu horário até o próximo do mesmo soro (ou até o fim da anestesia),
+// com o volume escrito no início — como as infusões e os gases.
+function soroContinuo(P, f, nome, inicio, top, rh) {
+  const doc = P.doc;
+  const xt = (t) => G.x0 + ((+new Date(t) - inicio) / (5 * MIN)) * G.cw;
+  const itens = f.fluidos.filter((x) => x.nome === nome).sort((a, b) => (a.t > b.t ? 1 : -1));
+  if (!itens.length) return;
+  const cor = itens[0].tipo === 'hemoderivado' ? COR.sangue : COR.soro;
+  const tFim = f.tempos.fimAnest ? +new Date(f.tempos.fimAnest) : ultimoTempo(f);
+  const yc = top + rh * 0.74;
+  itens.forEach((x, k) => {
+    const tIni = +new Date(x.t);
+    const tAte = Math.max(tIni, k + 1 < itens.length ? +new Date(itens[k + 1].t) : tFim);
+    const xa = Math.max(G.x0, xt(tIni)), xb = Math.min(G.x1, xt(tAte));
+    if (xb >= G.x0 && xa <= G.x1) zigzag(doc, xa, xb, yc, cor);
+    const x0 = xt(tIni);
+    if (x0 >= G.x0 - 0.01 && x0 <= G.x1) {
+      doc.setDrawColor(...cor); doc.setLineWidth(0.3);
+      doc.line(x0, yc - 0.9, x0, yc + 0.9);
+      doc.setDrawColor(0);
+      P.v(`${num(x.vol)} mL`, x0 + 0.3, top + 1.75, { size: 4.8, color: cor });
     }
   });
 }
@@ -403,10 +439,7 @@ function secoesTempo(P, f, inicio, linhasDrogas, primeira, favoritos) {
     if (ln.nome) P.v(ln.nome, 10, y, { size: 6.2, maxW: 19.6 }); else P.t(ln.rot, 10.5, y, { size: 6 });
     const cel = new Map();
     if (ln.soro && ln.nome) {
-      f.fluidos.filter((x) => x.nome === ln.nome).forEach((x) => {
-        const c = col15(x.t);
-        if (c >= 0 && c < 16) cel.set(c, (cel.get(c) || 0) + (+x.vol || 0));
-      });
+      if (inicio !== null) soroContinuo(P, f, ln.nome, inicio, m0 + i * mh, mh);
     } else if (ln.campo) {
       [...f.vitais].sort((a, b) => (a.t > b.t ? 1 : -1)).forEach((v) => {
         const c = col15(v.t);
@@ -467,16 +500,17 @@ function secoesTempo(P, f, inicio, linhasDrogas, primeira, favoritos) {
     const c = col(e.t);
     if (!noJanela(c)) continue;
     const x = G.x0 + c * G.cw + G.cw / 2;
-    doc.setFillColor(255, 255, 255); doc.setDrawColor(...INK); doc.setLineWidth(0.25);
+    doc.setFillColor(255, 255, 255); doc.setDrawColor(...COR.evento); doc.setLineWidth(0.3);
     doc.circle(x, top + 1.6, 1.35, 'FD');
     doc.setDrawColor(0);
-    P.v(String(e.n), x, top + 2.4, { size: 4.8, align: 'center', bold: true });
+    P.v(String(e.n), x, top + 2.4, { size: 4.8, align: 'center', bold: true, color: COR.evento });
   }
 }
 
 function simbolo(doc, tipo, x, y) {
   const s = 1.1;
-  doc.setFillColor(...INK); doc.setDrawColor(...INK); doc.setLineWidth(0.1);
+  const cor = tipo === 'fc' ? COR.fc : COR.pa;
+  doc.setFillColor(...cor); doc.setDrawColor(...cor); doc.setLineWidth(0.1);
   if (tipo === 'pas') doc.triangle(x - s, y - 1.8 * s, x + s, y - 1.8 * s, x, y, 'F');
   if (tipo === 'pad') doc.triangle(x - s, y + 1.8 * s, x + s, y + 1.8 * s, x, y, 'F');
   if (tipo === 'fc') doc.circle(x, y, 0.75, 'F');

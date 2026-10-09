@@ -14,7 +14,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const APP_VERSAO = '1.3.4';
+const APP_VERSAO = '1.3.5';
 const DESENVOLVEDOR = 'Adriano A S Mendonça';
 
 // Rodando dentro do APK Android (Capacitor)?
@@ -569,6 +569,7 @@ function telaFicha() {
   window.scrollTo(0, 0);
   if (S.aba === 'intra') iniciarIntra();
   if (S.aba === 'fim') ligarFim();
+  if (S.aba === 'pac') ligarSugestaoPre();
 }
 
 // ----- ligação dos campos (data-f="caminho.no.objeto")
@@ -620,7 +621,10 @@ function mudou(path) {
     const crm = crmDoCirurgiao(S.f.pac.cirurgiao);
     if (crm) { S.f.pac.cirurgiaoCrm = crm; const el = $('[data-f="pac.cirurgiaoCrm"]'); if (el) el.value = crm; }
   }
-  if (path === 'pac.nome') { const b = $('.topbar .ttl b'); if (b) b.textContent = S.f.pac.nome || 'Nova ficha'; }
+  if (path === 'pac.nome') {
+    const b = $('.topbar .ttl b'); if (b) b.textContent = S.f.pac.nome || 'Nova ficha';
+    const sug = $('#sugpre'); if (sug) { sug.innerHTML = htmlSugestaoPre(); ligarSugestaoPre(); }
+  }
   $$('[data-calc]').forEach((el) => {
     const [tipo, arg] = el.dataset.calc.split(':');
     if (tipo === 'ald') el.textContent = aldreteTotal(S.f, arg) === '' ? '–' : aldreteTotal(S.f, arg);
@@ -661,10 +665,67 @@ function crmDoCirurgiao(nome) {
   return f ? f.pac.cirurgiaoCrm : '';
 }
 
+// ----- procedimentos mais realizados (lista flutuante)
+function datalistProcedimentos() {
+  const cont = new Map();
+  const somar = (t) => { const v = String(t || '').trim(); if (!v) return; const k = v.toLowerCase(); const a = cont.get(k); cont.set(k, { v: a?.v || v, n: (a?.n || 0) + 1 }); };
+  for (const x of S.fichas) { if (x.id === S.f?.id) continue; x.pac.intervencoes.forEach(somar); somar(x.pre.procedimento); }
+  const lista = [...cont.values()].sort((a, b) => b.n - a.n || a.v.localeCompare(b.v)).slice(0, 80);
+  return `<datalist id="procedimentos">${lista.map((x) => `<option value="${esc(x.v)}">`).join('')}</datalist>`;
+}
+
+// ----- pré-anestésico de um procedimento anterior do mesmo paciente
+const normNome = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+const temPre = (x) => Object.values(x.pre.itens || {}).some(Boolean) || Object.values(x.pre.negativos || {}).some(Boolean) || !!x.pre.asa
+  || x.pre.medicamentos.some((m) => m.nome) || x.pre.alergias.some((a) => a.agente) || !!x.pre.mallampati;
+
+function fichasAnterioresDoPaciente() {
+  const n = normNome(S.f?.pac.nome);
+  if (n.length < 5 || S.f.status !== 'rascunho') return [];
+  return S.fichas.filter((x) => x.id !== S.f.id && normNome(x.pac.nome) === n && temPre(x))
+    .sort((a, b) => ((b.pac.data || '') + b.criadaEm).localeCompare((a.pac.data || '') + a.criadaEm)).slice(0, 3);
+}
+
+function htmlSugestaoPre() {
+  const ant = fichasAnterioresDoPaciente();
+  if (!ant.length) return '';
+  return `<div class="note">📋 <b>Este paciente já tem ficha.</b> Usar o pré-anestésico de:
+    <div class="btns" style="margin-top:6px">${ant.map((x) => `<button type="button" class="btn" data-usapre="${x.id}">${dataBR(x.pac.data)} · ${esc(x.pac.intervencoes[0] || x.pre.procedimento || (x.status === 'rascunho' ? 'em andamento' : 'procedimento'))}</button>`).join('')}</div></div>`;
+}
+
+function ligarSugestaoPre() {
+  $$('[data-usapre]').forEach((b) => (b.onclick = async () => {
+    const origem = S.fichas.find((x) => x.id === b.dataset.usapre);
+    if (!origem) return;
+    if (temPre(S.f) && !(await confirmar('Usar pré-anestésico anterior', 'Esta ficha já tem dados no pré-anestésico. Substituir pelos da ficha de ' + dataBR(origem.pac.data) + '?', 'Substituir'))) return;
+    copiarPreAnestesico(S.f, origem);
+    await salvarAgora();
+    toast('Pré-anestésico copiado — confira e atualize o que mudou');
+    telaFicha();
+  }));
+}
+
+// Copia a avaliação pré-anestésica e os dados fixos do paciente (só preenche o que estiver vazio na ficha nova).
+function copiarPreAnestesico(dest, origem) {
+  const pre = structuredClone(origem.pre);
+  pre.diagnostico = ''; pre.procedimento = ''; // mudam a cada procedimento
+  dest.pre = pre;
+  for (const k of ['nome', 'nascimento', 'sexo', 'peso', 'altura', 'convenio', 'hospital']) if (!dest.pac[k] && origem.pac[k]) dest.pac[k] = origem.pac[k];
+  if (dest.pac.nascimento) {
+    const nasc = new Date(dest.pac.nascimento + 'T12:00'), ref = new Date((dest.pac.data || hojeLocal()) + 'T12:00');
+    let anos = ref.getFullYear() - nasc.getFullYear();
+    if (ref < new Date(ref.getFullYear(), nasc.getMonth(), nasc.getDate(), 12)) anos--;
+    if (anos >= 0) dest.pac.idade = String(anos);
+  } else if (!dest.pac.idade) dest.pac.idade = origem.pac.idade;
+  const u = store.usuarioAtual();
+  dest.auditoria.push({ em: new Date().toISOString(), acao: `Pré-anestésico copiado da ficha de ${dataBR(origem.pac.data)} (${origem.pac.intervencoes[0] || origem.pre.procedimento || 'procedimento'})`, por: `${u.nome} (CRM ${u.crm})` });
+}
+
 function abaPaciente() {
   const f = S.f;
   return card('Paciente', `<div class="grid">
       ${inp('pac.nome', 'Nome', { cls: 'full' })}
+      <div class="full" id="sugpre">${htmlSugestaoPre()}</div>
       ${inp('pac.hospital', 'Hospital', { cls: 'full', list: 'hospitais' })}
       <datalist id="hospitais">${[...new Set(S.fichas.map((x) => x.pac.hospital).filter(Boolean))].sort().map((h) => `<option value="${esc(h)}">`).join('')}</datalist>
       ${inp('pac.nascimento', 'Data de nascimento', { type: 'date' })}
@@ -690,7 +751,8 @@ function abaPaciente() {
       ${inp('pac.aux2', '2º Auxiliar', { list: 'cirurgioes' })}
     </div>`)
   + card('Intervenção cirúrgica realizada', `<div class="grid g2">
-      ${[0, 1, 2, 3, 4].map((i) => inp(`pac.intervencoes.${i}`, `${i + 1}.`)).join('')}</div>`);
+      ${[0, 1, 2, 3, 4].map((i) => inp(`pac.intervencoes.${i}`, `${i + 1}.`, { list: 'procedimentos' })).join('')}</div>
+      ${datalistProcedimentos()}`);
 }
 
 // Quadro que abre e fecha (como os sistemas): fechado mostra "Negativo" ou quantos registros há.
@@ -732,7 +794,7 @@ function abaPre() {
   return card('Avaliação pré-anestésica', `<div class="grid">
       ${inp('pre.dataAval', 'Data da avaliação', { type: 'date' })}${inp('pre.horaAval', 'Hora', { type: 'time' })}
       ${inp('pre.diagnostico', 'Diagnóstico pré-operatório', { cls: 'span2' })}
-      ${inp('pre.procedimento', 'Cirurgia / procedimento proposto', { cls: 'span2' })}</div>`)
+      ${inp('pre.procedimento', 'Cirurgia / procedimento proposto', { cls: 'span2', list: 'procedimentos' })}</div>${datalistProcedimentos()}`)
   + card('Sinais e jejum', `<div class="grid">
       ${inp('pac.peso', 'Peso (kg)', { im: 'decimal' })}${inp('pac.altura', 'Altura (cm)', { im: 'numeric' })}
       <label class="f">IMC<span class="calc" data-calc="imc">${imc(S.f) ? num(imc(S.f)) : '–'}</span></label>
@@ -1424,6 +1486,8 @@ function abaFim() {
       + card('Excluir', `<button class="btn bad" id="bdel">🗑️ Excluir este rascunho</button>`);
   } else if (f.status === 'finalizada') {
     topo = card('Ficha finalizada 🔒', `<p>Finalizada em ${dataHoraBR(f.finalizadaEm)}${f.versao > 1 ? ` · versão ${f.versao}` : ''}.</p>${acoesPdf}`)
+      + card('Novo procedimento deste paciente', `<p class="small muted">Cria uma ficha nova já com os dados do paciente e a avaliação pré-anestésica desta ficha (comorbidades, alergias, medicamentos, via aérea, ASA…). Tudo continua editável.</p>
+        <button class="btn pri" id="bnovopre">📋 Nova ficha com este pré-anestésico</button>`)
       + card('Correções', `<p class="small muted">Só ${esc(f.anestesista.nome)} pode editar esta ficha, com a senha. As alterações ficam registradas no histórico e no PDF.</p>
         <button class="btn" id="bedit">✏️ Editar com senha</button>`);
   } else {
@@ -1442,6 +1506,15 @@ function ligarFim() {
   const u = store.usuarioAtual();
   const por = `${u.nome} (CRM ${u.crm})`;
   $('#bver')?.addEventListener('click', () => acaoPdf('ver'));
+  $('#bnovopre')?.addEventListener('click', async () => {
+    const nova = novaFicha(u);
+    copiarPreAnestesico(nova, f);
+    S.fichas.unshift(nova);
+    S.f = nova;
+    await salvarAgora();
+    toast('Ficha nova criada com o pré-anestésico');
+    go(`#/ficha/${nova.id}/pac`);
+  });
   $('#bshare')?.addEventListener('click', () => acaoPdf('share'));
   $('#bbaixar')?.addEventListener('click', () => acaoPdf('baixar'));
   $('#bimp')?.addEventListener('click', () => acaoPdf('imprimir'));
