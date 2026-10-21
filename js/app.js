@@ -1697,7 +1697,8 @@ async function acaoPdf(modo) {
   await salvarAgora();
   toast('Gerando PDF…', 1500);
   try {
-    const blob = await gerarPDF(S.f, { favoritos: favoritos(), logo: await carregarLogo(), instituicao: store.usuarioAtual()?.instituicao || '' });
+    const senha = modo === 'imprimir' ? '' : senhaPdfAtual();
+    const blob = await gerarPDF(S.f, { favoritos: favoritos(), logo: await carregarLogo(), instituicao: store.usuarioAtual()?.instituicao || '', senha });
     const nome = nomeArquivo(S.f);
     if (NATIVO) {
       if (modo === 'baixar') return salvarNativo(blob, nome, 'application/pdf', 'Fichas');
@@ -1729,6 +1730,13 @@ function telaConfig() {
       <label class="f">UF<input type="text" name="uf" value="${esc(u.uf)}" maxlength="2" required></label>
       <div class="full"><button class="btn pri">Salvar dados</button></div></form>
       <p class="small muted">Vale para as próximas fichas. As já criadas mantêm o nome e CRM de quando foram feitas.</p>`)
+    + card('Senha dos PDFs', `${u.pdfSenha?.senha
+        ? `<p>🔒 Os PDFs salvos, abertos e compartilhados <b>pedem senha para abrir</b>. Senha em uso desde <b>${dataHoraBR(u.pdfSenha.desde)}</b>.</p>`
+        : '<p>Os PDFs <b>não têm senha</b>. Crie uma senha para que só quem a conhece consiga abrir os arquivos.</p>'}
+      <p class="small muted">A mesma senha vale para todos os PDFs até você trocá-la. A cada troca, o arquivo
+        <b>${ARQ_SENHAS}</b> é atualizado com as senhas e as datas${NATIVO ? ' (pasta <b>Senhas</b> do local escolhido)' : ''}. A impressão direta pelo app sai sem senha.</p>
+      <div class="btns"><button class="btn pri" id="bpdfsenha">🔒 ${u.pdfSenha?.senha ? 'Trocar senha' : 'Criar senha'}</button>
+        ${u.pdfSenha?.senha ? '<button class="btn" id="bpdfver">Ver senha e registro</button><button class="btn bad" id="bpdfoff">Tirar a senha</button>' : (u.pdfSenhas?.length ? '<button class="btn" id="bpdfver">Ver registro</button>' : '')}</div>`)
     + card('Cabeçalho da ficha (logo e instituição)', `
       <p class="small muted">Aparecem no topo do PDF.</p>
       <div style="display:flex;gap:14px;align-items:center;margin-bottom:10px">
@@ -1796,6 +1804,20 @@ function telaConfig() {
     const ini = e.target.iniciais.value.trim().toUpperCase();
     if (ini !== (u.iniciais || '')) { u.iniciais = ini; await store.salvarUsuario(); }
     await salvarPlanilha(e.target.ano.value, { avisar: true });
+  });
+  $('#bpdfsenha').onclick = () => definirSenhaPdf();
+  $('#bpdfoff')?.addEventListener('click', async () => {
+    if (!(await confirmar('Tirar a senha dos PDFs', 'Os próximos PDFs serão criados sem senha. Os já criados continuam com a senha antiga. Confirmar?', 'Tirar a senha', 'bad'))) return;
+    await trocarSenhaPdf('');
+  });
+  $('#bpdfver')?.addEventListener('click', async () => {
+    if (!(await pedirSenha('Para ver as senhas dos PDFs, confirme a senha do app.'))) return;
+    const linhas = registroSenhasPdf();
+    await modal({ title: 'Senhas dos PDFs', ok: 'Fechar', cancel: '',
+      body: `<div class="tl">${linhas.map((x) => `<div class="ev"><span><b style="font-family:monospace;font-size:16px">${esc(x.senha || '(sem senha)')}</b><br>
+        <span class="small muted">de ${dataHoraBR(x.desde)} ${x.ate ? `até ${dataHoraBR(x.ate)}` : '<b>até hoje (em uso)</b>'}</span></span></div>`).join('') || '<p class="muted">Nenhuma senha registrada.</p>'}</div>
+        <div class="btns" style="margin-top:10px"><button type="button" class="btn" id="bregsalvar">💾 Salvar arquivo do registro</button></div>`,
+      onOpen: (d) => ($('#bregsalvar', d).onclick = () => salvarRegistroSenhas({ avisar: true })) });
   });
   $('#bsenha').onclick = async () => {
     const r = await modal({
@@ -2103,6 +2125,71 @@ async function atualizarPlanilha(f) {
     return toast('Planilha não atualizada: em ⚙️ Configurações escolha uma pasta e “Salvar automaticamente na pasta”.', 7000);
   }
   if (await salvarPlanilha((f.pac.data || new Date().toISOString()).slice(0, 4))) toast('Planilha de anestesias atualizada', 2500);
+}
+
+// ----- senha dos PDFs (definida pelo usuário; vale para todos os PDFs até ser trocada)
+const ARQ_SENHAS = 'Registro de senhas dos PDFs.txt';
+const senhaPdfAtual = () => store.usuarioAtual()?.pdfSenha?.senha || '';
+
+// histórico completo: cada senha com o período em que esteve em uso
+function registroSenhasPdf() {
+  const u = store.usuarioAtual();
+  return [...(u.pdfSenhas || [])].sort((a, b) => (a.desde > b.desde ? -1 : 1));
+}
+
+async function definirSenhaPdf() {
+  const r = await modal({
+    title: senhaPdfAtual() ? 'Trocar a senha dos PDFs' : 'Criar a senha dos PDFs',
+    body: `<p class="small muted">Esta senha será pedida para abrir os PDFs criados a partir de agora (os anteriores continuam com a senha antiga).
+      Use pelo menos 4 caracteres. Evite acentos para funcionar em qualquer leitor de PDF.</p>
+      <label class="f">Nova senha<input type="text" name="s1" minlength="4" maxlength="32" required autocomplete="off" autocapitalize="off" spellcheck="false"></label><br>
+      <label class="f">Repita a senha<input type="text" name="s2" minlength="4" maxlength="32" required autocomplete="off" autocapitalize="off" spellcheck="false"></label>`,
+  });
+  if (r.v !== 'ok') return;
+  const s1 = r.data.s1.trim(), s2 = r.data.s2.trim();
+  if (s1 !== s2) return toast('As senhas não conferem', 4000);
+  if (s1.length < 4) return toast('Use pelo menos 4 caracteres', 4000);
+  if (/[^\x20-\x7E]/.test(s1)) return toast('Use só letras sem acento, números e símbolos comuns', 5000);
+  if (s1 === senhaPdfAtual()) return toast('Essa já é a senha em uso');
+  await trocarSenhaPdf(s1);
+}
+
+async function trocarSenhaPdf(nova) {
+  const u = store.usuarioAtual();
+  const agora = new Date().toISOString();
+  u.pdfSenhas ||= [];
+  const atual = u.pdfSenhas.find((x) => !x.ate);
+  if (atual) atual.ate = agora;
+  if (nova) u.pdfSenhas.push({ senha: nova, desde: agora, ate: null });
+  u.pdfSenha = nova ? { senha: nova, desde: agora } : null;
+  await store.salvarUsuario();
+  toast(nova ? 'Senha dos PDFs definida' : 'PDFs voltam a ser criados sem senha', 3000);
+  await salvarRegistroSenhas();
+  telaConfig();
+}
+
+function textoRegistroSenhas() {
+  const u = store.usuarioAtual();
+  const l = registroSenhasPdf().map((x) => `${(x.senha || '(sem senha)').padEnd(20)}  de ${dataHoraBR(x.desde)}  ${x.ate ? 'até ' + dataHoraBR(x.ate) : 'até hoje (em uso)'}`);
+  return ['REGISTRO DE SENHAS DOS PDFs — Ficha de Anestesia', `Anestesista: ${u.nome} — CRM ${u.crm}/${u.uf}`, `Atualizado em ${dataHoraBR(new Date().toISOString())}`, '',
+    'Cada PDF abre com a senha que estava em uso no dia e hora em que ele foi criado.', 'Guarde este arquivo em local seguro: ele contém as senhas.', '',
+    'SENHA                 PERÍODO EM USO', ...l, ''].join('\r\n');
+}
+
+// grava o registro: na pasta Senhas do local escolhido (APK) ou baixa o arquivo (site)
+async function salvarRegistroSenhas({ avisar = false } = {}) {
+  const blob = new Blob(['\uFEFF' + textoRegistroSenhas()], { type: 'text/plain' });
+  try {
+    if (NATIVO) {
+      const a = armazenamento();
+      if (a.modo === 'pasta' && a.uri) return await salvarNativo(blob, ARQ_SENHAS, 'text/plain', 'Senhas', { silencioso: !avisar, rotulo: 'Registro de senhas' })
+        && (avisar || toast(`Registro de senhas salvo em ${a.nome}/Senhas`, 3500), true);
+      return await salvarNativo(blob, ARQ_SENHAS, 'text/plain', 'Senhas');
+    }
+    baixar(blob, ARQ_SENHAS);
+    toast(`Registro salvo: ${ARQ_SENHAS}`, 3000);
+    return true;
+  } catch (e) { toast('Registro de senhas não salvo: ' + e.message, 6000); return false; }
 }
 
 function restaurarBackup() {

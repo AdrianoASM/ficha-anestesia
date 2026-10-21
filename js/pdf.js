@@ -21,9 +21,11 @@ const JANELA = 4 * 60 * MIN; // cada página do gráfico cobre 4 horas
 const G = { x0: 30, x1: 166, cols: 48 }; // grade de tempo: 48 colunas de 5 min
 G.cw = (G.x1 - G.x0) / G.cols;
 
-export async function gerarPDF(f, { favoritos, logo, instituicao = '' } = {}) {
+export async function gerarPDF(f, { favoritos, logo, instituicao = '', senha = '' } = {}) {
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  // senha (opcional): o PDF só abre com ela; permite imprimir e copiar texto
+  const dono = senha ? Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, '0')).join('') : '';
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', ...(senha ? { encryption: { userPassword: senha, ownerPassword: dono, userPermissions: ['print', 'copy'] } } : {}) });
   const P = pen(doc);
   P.instituicao = instituicao;
 
