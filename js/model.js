@@ -120,6 +120,8 @@ export const INFUSOES = [
   { nome: 'Isoflurano', unid: '%', faixa: '0,5–1,5 (CAM ≈ 1,15)', gas: true },
 ];
 // Textos prontos (breves) para as Anotações. O usuário pode editar a lista em Configurações.
+export const N_INTERVENCOES = 10; // cirurgias realizadas (no PDF saem só as preenchidas)
+
 export const TEXTOS_PADRAO = [
   'Paciente recebido em sala, identificado, consciente e orientado.',
   'Monitorização: ECG, SpO₂, PANI e capnografia.',
@@ -225,7 +227,7 @@ export function novaFicha(user) {
     pac: {
       codigo: '', nome: '', hospital: '', idade: '', data: hojeISO(), sexo: '', convenio: '', matricula: '', carater: '',
       convMatricula: '', guiaNum: '', guiaSenha: '', // convênio: matrícula do beneficiário, nº e senha da guia
-      peso: '', altura: '', nascimento: '', jejum: '', cirurgiao: '', cirurgiaoCrm: '', aux1: '', aux2: '', intervencoes: ['', '', '', '', ''],
+      peso: '', altura: '', nascimento: '', jejum: '', cirurgiao: '', cirurgiaoCrm: '', aux1: '', aux2: '', intervencoes: Array(N_INTERVENCOES).fill(''),
     },
     tempos: { inicioAnest: null, inicioCir: null, fimCir: null, fimAnest: null },
     vitais: [], // {id, t, pas, pad, fc, spo2, etco2, temp, ritmo}
@@ -346,6 +348,7 @@ export function normalizarFicha(f) {
   f.pac.nascimento ??= '';
   f.infusoes ??= [];
   f.transferencias ??= [];
+  while (f.pac.intervencoes.length < N_INTERVENCOES) f.pac.intervencoes.push('');
   for (const k of ['codigo', 'convMatricula', 'guiaNum', 'guiaSenha']) f.pac[k] ??= '';
   f.srpa.admDor ??= ''; f.srpa.admDorEscala ??= 'Adulto'; f.srpa.altaDor ??= ''; f.srpa.altaDorEscala ??= 'Adulto';
   if (f.srpa.encaminhado === 'APT') f.srpa.encaminhado = 'Leito';

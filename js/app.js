@@ -765,6 +765,8 @@ function abaPaciente() {
     </div>`)
   + card('Intervenção cirúrgica realizada', `<div class="grid g2">
       ${[0, 1, 2, 3, 4].map((i) => inp(`pac.intervencoes.${i}`, `${i + 1}.`, { list: 'procedimentos' })).join('')}</div>
+      <details class="mais" ${f.pac.intervencoes.slice(5).some(Boolean) ? 'open' : ''} style="margin-top:8px"><summary class="small"><b>Mais cirurgias (6 a 10)</b></summary>
+        <div class="grid g2" style="margin-top:8px">${[5, 6, 7, 8, 9].map((i) => inp(`pac.intervencoes.${i}`, `${i + 1}.`, { list: 'procedimentos' })).join('')}</div></details>
       ${datalistProcedimentos()}`);
 }
 

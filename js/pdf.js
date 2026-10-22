@@ -252,11 +252,22 @@ function pagina1(P, f, logo, favoritos) {
   // Caixa C: intervenções
   P.rect(100.6, 36, 98.4, 32.5);
   P.t('INTERVENÇÃO CIRÚRGICA REALIZADA', 149.8, 40, { size: 7, bold: true, align: 'center' });
-  for (let i = 0; i < 5; i++) {
-    const y = 41.5 + i * 5.4;
-    P.line(100.6, y, 199, y, 0.2);
-    P.t(`${i + 1}.`, 102, y + 3.8, { size: 6.5 });
-    P.v(a.intervencoes[i], 106, y + 3.8, { maxW: 92 });
+  const cir = a.intervencoes.map((x) => String(x || '').trim()).filter(Boolean);
+  for (let i = 0; i < 5; i++) P.line(100.6, 41.5 + i * 5.4, 199, 41.5 + i * 5.4, 0.2);
+  if (cir.length <= 5) {
+    // ficha em branco: numera as 5 linhas para preencher à mão; preenchida: só as cirurgias informadas
+    for (let i = 0; i < 5; i++) {
+      const y = 41.5 + i * 5.4 + 3.8;
+      if (cir[i] || !cir.length) P.t(`${i + 1}.`, 102, y, { size: 6.5 });
+      if (cir[i]) P.v(cir[i], 106, y, { maxW: 92 });
+    }
+  } else {
+    P.line(149.8, 41.5, 149.8, 68.5, 0.2);
+    cir.forEach((c, i) => {
+      const x = i < 5 ? 100.6 : 149.8, y = 41.5 + (i % 5) * 5.4 + 3.8;
+      P.t(`${i + 1}.`, x + 1.2, y, { size: 6 });
+      P.v(c, x + (i < 9 ? 4.6 : 5.6), y, { size: 7.4, maxW: i < 9 ? 44 : 43 });
+    });
   }
 
   // Acesso venoso (lateral da seção de agentes)
@@ -295,7 +306,7 @@ function vGradeTempo(P, y1, y2) {
 function zigzag(doc, x1, x2, yc, cor = INK) {
   if (x2 - x1 < 0.4) return;
   doc.setDrawColor(...cor);
-  doc.setLineWidth(0.22);
+  doc.setLineWidth(0.3);
   const passo = 0.6, amp = 0.55;
   let x = x1, yAnt = yc, cima = true;
   while (x < x2 - 1e-6) {
@@ -371,7 +382,7 @@ function gradeAgentes(P, f, inicio, linhas, primeira, favoritos) {
           if (xe < G.x0 - 0.01 || xe > G.x1) return;
           doc.line(xe, yc - 0.9, xe, yc + 0.9);
           const txt = num(e.valor) + (k === 0 ? ` ${inf.tci || inf.unid}` : '');
-          P.v(txt, xe + 0.3, top + 1.75, { size: 4.6, color: cor });
+          P.v(txt, xe + 0.3, top + 1.75, { size: 4.8, bold: true, color: cor });
           doc.setDrawColor(...cor);
         });
         if (inf.fim && xt(inf.fim) <= G.x1) { doc.setLineWidth(0.45); doc.line(xb, yc - 1.1, xb, yc + 1.1); }
@@ -406,7 +417,7 @@ function soroContinuo(P, f, nome, inicio, top, rh) {
       doc.setDrawColor(...cor); doc.setLineWidth(0.3);
       doc.line(x0, yc - 0.9, x0, yc + 0.9);
       doc.setDrawColor(0);
-      P.v(`${num(x.vol)} mL`, x0 + 0.3, top + 1.75, { size: 4.8, color: cor });
+      P.v(`${num(x.vol)} mL`, x0 + 0.3, top + 1.75, { size: 4.8, bold: true, color: cor });
     }
   });
 }
