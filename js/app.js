@@ -14,7 +14,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const APP_VERSAO = '1.3.6';
+const APP_VERSAO = '1.3.7';
 const DESENVOLVEDOR = 'Adriano A S Mendonça';
 
 // Rodando dentro do APK Android (Capacitor)?
@@ -509,7 +509,7 @@ function telaLista() {
   $('#bsync')?.addEventListener('click', () => sincronizar({ silencioso: false, completa: true }));
   sincronizarDeVezEmQuando();
   const q = S.filtro.toLowerCase();
-  const lista = S.fichas.filter((f) => !q || `${f.pac.nome} ${f.pac.hospital || ''} ${f.pac.convenio} ${f.pre.procedimento} ${f.pac.intervencoes.join(' ')}`.toLowerCase().includes(q));
+  const lista = S.fichas.filter((f) => !q || `${f.pac.nome} ${f.pac.hospital || ''} ${f.pac.convenio} ${f.pac.codigo || ''} ${f.pac.guiaNum || ''} ${f.pre.procedimento} ${f.pac.intervencoes.join(' ')}`.toLowerCase().includes(q));
   const rotulo = { rascunho: 'Em andamento', finalizada: 'Finalizada', revisao: 'Em revisão' };
   const semPasta = NATIVO && !armazenamento().uri && !armazenamento().modo;
   const venc = S.licenca?.e ? Math.ceil((new Date(S.licenca.e + 'T23:59') - new Date()) / 86400000) : null;
@@ -621,6 +621,12 @@ function mudou(path) {
     const crm = crmDoCirurgiao(S.f.pac.cirurgiao);
     if (crm) { S.f.pac.cirurgiaoCrm = crm; const el = $('[data-f="pac.cirurgiaoCrm"]'); if (el) el.value = crm; }
   }
+  if (path === 'pac.codigo') {
+    const el = $('[data-f="pac.codigo"]');
+    const v = String(S.f.pac.codigo || '').toUpperCase().replace(/\s+/g, '');
+    if (v !== S.f.pac.codigo) { S.f.pac.codigo = v; if (el) { const p = el.selectionStart; el.value = v; el.setSelectionRange(p, p); } }
+    const h = $('#codhint'); if (h) h.hidden = !v || CODIGO_OK.test(v);
+  }
   if (path === 'pac.nome') {
     const b = $('.topbar .ttl b'); if (b) b.textContent = S.f.pac.nome || 'Nova ficha';
     const sug = $('#sugpre'); if (sug) { sug.innerHTML = htmlSugestaoPre(); ligarSugestaoPre(); }
@@ -710,7 +716,7 @@ function copiarPreAnestesico(dest, origem) {
   const pre = structuredClone(origem.pre);
   pre.diagnostico = ''; pre.procedimento = ''; // mudam a cada procedimento
   dest.pre = pre;
-  for (const k of ['nome', 'nascimento', 'sexo', 'peso', 'altura', 'convenio', 'hospital']) if (!dest.pac[k] && origem.pac[k]) dest.pac[k] = origem.pac[k];
+  for (const k of ['nome', 'nascimento', 'sexo', 'peso', 'altura', 'convenio', 'convMatricula', 'hospital']) if (!dest.pac[k] && origem.pac[k]) dest.pac[k] = origem.pac[k];
   if (dest.pac.nascimento) {
     const nasc = new Date(dest.pac.nascimento + 'T12:00'), ref = new Date((dest.pac.data || hojeLocal()) + 'T12:00');
     let anos = ref.getFullYear() - nasc.getFullYear();
@@ -721,9 +727,13 @@ function copiarPreAnestesico(dest, origem) {
   dest.auditoria.push({ em: new Date().toISOString(), acao: `Pré-anestésico copiado da ficha de ${dataBR(origem.pac.data)} (${origem.pac.intervencoes[0] || origem.pre.procedimento || 'procedimento'})`, por: `${u.nome} (CRM ${u.crm})` });
 }
 
+const CODIGO_OK = /^\d{6}[A-Z]{2}\d{5}$/; // 000000AA00000
+
 function abaPaciente() {
   const f = S.f;
   return card('Paciente', `<div class="grid">
+      <label class="f full">Código<input type="text" data-f="pac.codigo" maxlength="13" placeholder="000000AA00000" autocomplete="off" autocapitalize="characters" spellcheck="false" style="font-family:monospace;letter-spacing:1px">
+        <span class="small" id="codhint" style="color:var(--warn)" ${!f.pac.codigo || CODIGO_OK.test(f.pac.codigo) ? 'hidden' : ''}>Formato esperado: 6 números, 2 letras, 5 números (ex.: 123456AB12345)</span></label>
       ${inp('pac.nome', 'Nome', { cls: 'full' })}
       <div class="full" id="sugpre">${htmlSugestaoPre()}</div>
       ${inp('pac.hospital', 'Hospital', { cls: 'full', list: 'hospitais' })}
@@ -736,6 +746,9 @@ function abaPaciente() {
       <label class="f">IMC (kg/m²)<span class="calc" data-calc="imc">${imc(f) ? num(imc(f)) : '–'}</span></label>
       ${inp('pac.jejum', 'Jejum (h)', { im: 'decimal' })}
       ${inp('pac.convenio', 'Convênio')}
+      ${inp('pac.convMatricula', 'Matrícula do convênio')}
+      ${inp('pac.guiaNum', 'Nº da guia')}
+      ${inp('pac.guiaSenha', 'Senha da guia')}
       ${inp('pac.matricula', 'Acomodação', { list: 'acomodacoes' })}
       <datalist id="acomodacoes"><option value="Enfermaria"><option value="Apartamento"><option value="UTI"><option value="Ambulatório"></datalist>
     </div>

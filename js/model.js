@@ -223,7 +223,8 @@ export function novaFicha(user) {
     auditoria: [{ em: new Date().toISOString(), acao: 'Ficha criada', por: `${user.nome} (CRM ${user.crm})` }],
     anestesista: { nome: user.nome, crm: user.crm, uf: user.uf },
     pac: {
-      nome: '', hospital: '', idade: '', data: hojeISO(), sexo: '', convenio: '', matricula: '', carater: '',
+      codigo: '', nome: '', hospital: '', idade: '', data: hojeISO(), sexo: '', convenio: '', matricula: '', carater: '',
+      convMatricula: '', guiaNum: '', guiaSenha: '', // convênio: matrícula do beneficiário, nº e senha da guia
       peso: '', altura: '', nascimento: '', jejum: '', cirurgiao: '', cirurgiaoCrm: '', aux1: '', aux2: '', intervencoes: ['', '', '', '', ''],
     },
     tempos: { inicioAnest: null, inicioCir: null, fimCir: null, fimAnest: null },
@@ -345,6 +346,7 @@ export function normalizarFicha(f) {
   f.pac.nascimento ??= '';
   f.infusoes ??= [];
   f.transferencias ??= [];
+  for (const k of ['codigo', 'convMatricula', 'guiaNum', 'guiaSenha']) f.pac[k] ??= '';
   f.srpa.admDor ??= ''; f.srpa.admDorEscala ??= 'Adulto'; f.srpa.altaDor ??= ''; f.srpa.altaDorEscala ??= 'Adulto';
   if (f.srpa.encaminhado === 'APT') f.srpa.encaminhado = 'Leito';
   f.srpa.medicoOutro ??= ''; f.srpa.medicoNome ??= ''; f.srpa.medicoCrm ??= '';

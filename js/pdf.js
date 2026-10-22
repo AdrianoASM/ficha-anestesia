@@ -28,6 +28,7 @@ export async function gerarPDF(f, { favoritos, logo, instituicao = '', senha = '
   const doc = new jsPDF({ unit: 'mm', format: 'a4', ...(senha ? { encryption: { userPassword: senha, ownerPassword: dono, userPermissions: ['print', 'copy'] } } : {}) });
   const P = pen(doc);
   P.instituicao = instituicao;
+  P.codigo = String(f.pac.codigo || '').trim();
 
   const janelas = calcJanelas(f);
   const linhas = linhasAgentes(f);
@@ -186,16 +187,17 @@ function eventosNumerados(f) {
 
 // ---------- página 1 ----------
 function titulo(P, texto, logo) {
-  P.t(texto, 99, P.instituicao ? 14 : 16, { size: 15, bold: true, align: 'center' });
-  if (P.instituicao) P.t(P.instituicao, 99, 20, { size: 8.5, align: 'center', maxW: 150 });
+  if (P.codigo) P.campo('Código', P.codigo, 9, 7.5, 52, { size: 6, vsize: 7.4 });
+  P.t(texto, 99, P.instituicao ? 10 : 12, { size: 15, bold: true, align: 'center' });
+  if (P.instituicao) P.t(P.instituicao, 99, 15.6, { size: 8.5, align: 'center', maxW: 150 });
   if (logo) {
     // cabe numa caixa de 22 x 16 mm, mantendo a proporção
     try {
       const fmt = logo.startsWith('data:image/jpeg') ? 'JPEG' : 'PNG';
       const { width, height } = P.doc.getImageProperties(logo);
-      const k = Math.min(22 / width, 16 / height);
+      const k = Math.min(22 / width, 14 / height);
       const w = width * k, h = height * k;
-      P.doc.addImage(logo, fmt, 199 - w, 4 + (16 - h) / 2, w, h);
+      P.doc.addImage(logo, fmt, 199 - w, 3 + (14 - h) / 2, w, h);
     } catch { /* imagem inválida: segue sem logo */ }
   }
 }
@@ -205,19 +207,22 @@ function pagina1(P, f, logo, favoritos) {
   titulo(P, 'FICHA DE ANESTESIA', logo);
 
   // Identificação
-  P.campo('Nome:', a.nome, 9, 28, 131);
-  P.campo('Idade', a.idade, 132, 28, 146);
-  P.campo('Data', dataBR(a.data), 147.5, 28, 179);
-  P.t('Sexo', 181, 28);
-  P.circ(188, 28, a.sexo === 'F', 'F', { size: 7 });
-  P.circ(194, 28, a.sexo === 'M', 'M', { size: 7 });
-  P.campo('Hospital', a.hospital, 9, 33.6, 68);
-  P.campo('Convênio', a.convenio, 69.5, 33.6, 102);
-  P.campo('Acomodação', a.matricula, 103.5, 33.6, 146);
-  P.t('Caráter:', 148, 33.6);
-  P.circ(158.5, 33.6, a.carater === 'Eletivo', 'Eletivo');
-  P.circ(171, 33.6, a.carater === 'Urgência', 'Urgência');
-  P.circ(185, 33.6, a.carater === 'Emergência', 'Emergência');
+  P.campo('Nome:', a.nome, 9, 22.4, 131);
+  P.campo('Idade', a.idade, 132, 22.4, 146);
+  P.campo('Data', dataBR(a.data), 147.5, 22.4, 179);
+  P.t('Sexo', 181, 22.4);
+  P.circ(188, 22.4, a.sexo === 'F', 'F', { size: 7 });
+  P.circ(194, 22.4, a.sexo === 'M', 'M', { size: 7 });
+  P.campo('Hospital', a.hospital, 9, 28, 68);
+  P.campo('Convênio', a.convenio, 69.5, 28, 102);
+  P.campo('Acomodação', a.matricula, 103.5, 28, 146);
+  P.t('Caráter:', 148, 28);
+  P.circ(158.5, 28, a.carater === 'Eletivo', 'Eletivo');
+  P.circ(171, 28, a.carater === 'Urgência', 'Urgência');
+  P.circ(185, 28, a.carater === 'Emergência', 'Emergência');
+  P.campo('Matrícula do convênio', a.convMatricula, 9, 33.6, 82);
+  P.campo('Nº da guia', a.guiaNum, 84, 33.6, 140);
+  P.campo('Senha da guia', a.guiaSenha, 142, 33.6, 199);
 
   // Caixa A
   P.rect(9, 36, 32, 32.5);
@@ -275,9 +280,9 @@ function pagina1(P, f, logo, favoritos) {
 
 function cabecalhoContinuacao(P, f, logo, n, texto) {
   titulo(P, `FICHA DE ANESTESIA — continuação (${n})`, logo);
-  P.campo('Nome:', f.pac.nome, 9, 28, 131);
-  P.campo('Data', dataBR(f.pac.data), 147.5, 28, 179);
-  P.campo('Hospital', f.pac.hospital, 9, 33.6, 131);
+  P.campo('Nome:', f.pac.nome, 9, 22.4, 131);
+  P.campo('Data', dataBR(f.pac.data), 147.5, 22.4, 179);
+  P.campo('Hospital', f.pac.hospital, 9, 28, 131);
   P.t(texto, 9, 50, { size: 8, italic: true });
 }
 
