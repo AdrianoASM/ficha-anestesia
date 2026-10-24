@@ -162,12 +162,18 @@ const xml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
   .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
 const col = (i) => { let s = ''; for (i++; i; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + ((i - 1) % 26)) + s; return s; };
 const serialData = (iso) => { const [y, m, d] = iso.split('-').map(Number); return (Date.UTC(y, m - 1, d) - Date.UTC(1899, 11, 30)) / 86400000; };
+// data e hora no fuso do aparelho
+const serialDataHora = (iso) => { const d = new Date(iso); return (Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()) - Date.UTC(1899, 11, 30)) / 86400000; };
 
-function folha(linhas) {
+function folha(COLUNAS, linhas) {
   const cab = `<row r="1">${COLUNAS.map(([t], i) => `<c r="${col(i)}1" t="inlineStr" s="1"><is><t>${xml(t)}</t></is></c>`).join('')}</row>`;
   const corpo = linhas.map((ln, r) => `<row r="${r + 2}">${ln.map((v, i) => {
     const ref = `${col(i)}${r + 2}`;
-    if (v && typeof v === 'object') return /^\d{4}-\d{2}-\d{2}$/.test(v.data || '') ? `<c r="${ref}" s="2"><v>${serialData(v.data)}</v></c>` : `<c r="${ref}"/>`;
+    if (v && typeof v === 'object') {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(v.data || '')) return `<c r="${ref}" s="2"><v>${serialData(v.data)}</v></c>`;
+      if (v.dataHora && !Number.isNaN(+new Date(v.dataHora))) return `<c r="${ref}" s="4"><v>${serialDataHora(v.dataHora)}</v></c>`;
+      return `<c r="${ref}"/>`;
+    }
     return `<c r="${ref}" t="inlineStr" s="3"><is><t xml:space="preserve">${xml(v)}</t></is></c>`;
   }).join('')}</row>`).join('');
   const ult = `${col(COLUNAS.length - 1)}${Math.max(1, linhas.length + 1)}`;
@@ -182,18 +188,20 @@ function folha(linhas) {
 
 const ESTILOS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<numFmts count="1"><numFmt numFmtId="164" formatCode="dd/mm/yyyy hh:mm"/></numFmts>
 <fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts>
 <fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1D5A86"/></patternFill></fill></fills>
 <borders count="1"><border/></borders>
 <cellStyleXfs count="1"><xf/></cellStyleXfs>
-<cellXfs count="4"><xf/>
+<cellXfs count="5"><xf/>
 <xf fontId="1" fillId="2" applyFont="1" applyFill="1" applyAlignment="1"><alignment wrapText="1" vertical="center"/></xf>
 <xf numFmtId="14" applyNumberFormat="1" applyAlignment="1"><alignment vertical="top"/></xf>
-<xf applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf></cellXfs>
+<xf applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf>
+<xf numFmtId="164" applyNumberFormat="1" applyAlignment="1"><alignment vertical="top"/></xf></cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;
 
-function arquivosXlsx(linhas, nomeAba) {
+function arquivosXlsx(COLUNAS, linhas, nomeAba) {
   return {
     '[Content_Types].xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`,
@@ -204,7 +212,7 @@ function arquivosXlsx(linhas, nomeAba) {
     'xl/_rels/workbook.xml.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
     'xl/styles.xml': ESTILOS,
-    'xl/worksheets/sheet1.xml': folha(linhas),
+    'xl/worksheets/sheet1.xml': folha(COLUNAS, linhas),
   };
 }
 
@@ -235,4 +243,33 @@ function zip(arquivos) {
 
 export const MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 export const nomePlanilha = (ano) => `Anestesias ${ano}.xlsx`;
-export const gerarPlanilha = (fichas, ano, iniciaisAnest) => zip(arquivosXlsx(linhasDoAno(fichas, ano, iniciaisAnest), `Anestesias ${ano}`));
+export const gerarPlanilha = (fichas, ano, iniciaisAnest) => zip(arquivosXlsx(COLUNAS, linhasDoAno(fichas, ano, iniciaisAnest), `Anestesias ${ano}`));
+
+// ---------------------------------------------------------------- Comprovantes de anestesia (arquivo único, todas as fichas finalizadas)
+export const NOME_COMPROVANTES = 'Comprovantes_de_Anestesia.xlsx';
+export const COLUNAS_COMPROV = [
+  ['Código', 16], ['Hospital', 24], ['Convênio', 16], ['Nº da guia', 14], ['Senha da guia', 13], ['Paciente', 30], ['Data de nascimento', 12], ['Idade', 7],
+  ['Acomodação', 14], ['Início', 17], ['Fim', 17], ['Cirurgião', 26], ['CRM do cirurgião', 12], ['Procedimentos', 45],
+];
+
+// início da anestesia (ou a data da cirurgia, se não houver horário) — para ordenar do mais antigo para o mais recente
+const inicioOrdem = (f) => f.tempos.inicioAnest || (f.pac.data ? f.pac.data + 'T00:00' : '');
+
+export function linhaComprovante(f) {
+  const p = f.pac;
+  return [
+    p.codigo || '', p.hospital || '', p.convenio || '', p.guiaNum || '', p.guiaSenha || '', p.nome || '',
+    { data: p.nascimento || '' }, p.idade || '', p.matricula || '',
+    f.tempos.inicioAnest ? { dataHora: f.tempos.inicioAnest } : { data: p.data || '' },
+    f.tempos.fimAnest ? { dataHora: f.tempos.fimAnest } : '',
+    p.cirurgiao || '', p.cirurgiaoCrm || '',
+    p.intervencoes.map((x) => String(x || '').trim()).filter(Boolean).join('; ') || f.pre.procedimento || '',
+  ];
+}
+
+export function linhasComprovantes(fichas) {
+  return fichas.map(versaoFinal).filter(Boolean)
+    .sort((a, b) => String(inicioOrdem(a)).localeCompare(String(inicioOrdem(b))))
+    .map(linhaComprovante);
+}
+export const gerarComprovantes = (fichas) => zip(arquivosXlsx(COLUNAS_COMPROV, linhasComprovantes(fichas), 'Comprovantes'));

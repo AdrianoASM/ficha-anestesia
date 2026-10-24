@@ -14,7 +14,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const APP_VERSAO = '1.3.8';
+const APP_VERSAO = '1.3.9';
 const DESENVOLVEDOR = 'Adriano A S Mendonça';
 
 // Rodando dentro do APK Android (Capacitor)?
@@ -1771,7 +1771,9 @@ function telaConfig() {
       <form id="fplan" class="grid">
         <label class="f">Minhas iniciais na planilha<input type="text" name="iniciais" value="${esc(iniciaisAnest())}" maxlength="6" autocomplete="off"></label>
         <label class="f">Ano<select name="ano">${anosPlanilha().map((a) => `<option>${a}</option>`).join('')}</select></label>
-        <div class="full btns"><button class="btn pri">📊 Gerar planilha agora</button></div></form>`))
+        <div class="full btns"><button class="btn pri">📊 Gerar planilha agora</button></div></form>
+      <p class="small muted" style="margin-top:12px">O arquivo <b>${planilha.NOME_COMPROVANTES}</b> (mesma pasta) reúne <b>todas</b> as fichas finalizadas — código, hospital, convênio, nº e senha da guia, paciente, nascimento, idade, acomodação, início e fim da anestesia, cirurgião, CRM e procedimentos — em ordem de início. Também é atualizado ao finalizar.</p>
+      <div class="btns"><button class="btn" id="bcomprov">🧾 Gerar comprovantes agora</button></div>`))
     + (NATIVO ? cardArmazenamento() + cardSync() : '')
     + card('Senha', `<div class="btns"><button class="btn" id="bsenha">Trocar senha</button></div>`)
     + card('Backup', `<p class="small">O backup contém suas fichas <b>criptografadas</b>: só abre com a sua senha ou o código de recuperação.
@@ -1814,6 +1816,7 @@ function telaConfig() {
     u.instituicao = e.target.instituicao.value.trim();
     await store.salvarUsuario(); toast('Instituição salva'); telaConfig();
   };
+  $('#bcomprov')?.addEventListener('click', () => salvarComprovantes({ avisar: true }));
   $('#fplan')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const ini = e.target.iniciais.value.trim().toUpperCase();
@@ -2132,6 +2135,21 @@ async function salvarPlanilha(ano, { avisar = false } = {}) {
   }
 }
 
+// Comprovantes_de_Anestesia.xlsx: arquivo único com todas as fichas finalizadas
+async function salvarComprovantes({ avisar = false } = {}) {
+  try {
+    const blob = planilha.gerarComprovantes(await store.listarFichas());
+    if (NATIVO) return await salvarNativo(blob, planilha.NOME_COMPROVANTES, planilha.MIME_XLSX, 'Fichas', { silencioso: !avisar, rotulo: 'Comprovantes de anestesia' });
+    baixar(blob, planilha.NOME_COMPROVANTES);
+    if (avisar) toast(`Salvo: ${planilha.NOME_COMPROVANTES}`);
+    return true;
+  } catch (e) {
+    console.error(e);
+    toast('Comprovantes não atualizados: ' + e.message, 6000);
+    return false;
+  }
+}
+
 // Depois de finalizar (ou concluir uma revisão): refaz a planilha do ano da ficha na pasta configurada.
 async function atualizarPlanilha(f) {
   if (!PLANILHA || !NATIVO) return;
@@ -2139,7 +2157,10 @@ async function atualizarPlanilha(f) {
   if (!(a.modo === 'pasta' && a.uri)) {
     return toast('Planilha não atualizada: em ⚙️ Configurações escolha uma pasta e “Salvar automaticamente na pasta”.', 7000);
   }
-  if (await salvarPlanilha((f.pac.data || new Date().toISOString()).slice(0, 4))) toast('Planilha de anestesias atualizada', 2500);
+  const ok1 = await salvarPlanilha((f.pac.data || new Date().toISOString()).slice(0, 4));
+  const ok2 = await salvarComprovantes();
+  if (ok1 && ok2) toast('Planilha e comprovantes atualizados', 2500);
+  else if (ok1) toast('Planilha de anestesias atualizada', 2500);
 }
 
 // ----- senha dos PDFs (definida pelo usuário; vale para todos os PDFs até ser trocada)
