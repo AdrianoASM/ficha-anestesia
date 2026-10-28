@@ -594,6 +594,22 @@ function bind(root) {
       el.checked = !!val;
       el.disabled = lock;
       el.onchange = () => { setP(S.f, path, el.checked); mudou(path); };
+    } else if (el.dataset.mask === 'data') {
+      el.value = isoParaBR(val);
+      el.disabled = lock;
+      el.oninput = () => {
+        const iso = el.value ? brParaISO(el.value) : '';
+        el.classList.toggle('invalido', el.value.length === 10 && iso === null);
+        if (iso !== null && iso !== getP(S.f, path)) { setP(S.f, path, iso); mudou(path); }
+      };
+    } else if (el.dataset.mask === 'hora') {
+      el.value = val ?? '';
+      el.disabled = lock;
+      el.oninput = () => {
+        const ok = !el.value || horaValida(el.value);
+        el.classList.toggle('invalido', el.value.length === 5 && !ok);
+        if (ok && el.value !== (getP(S.f, path) ?? '')) { setP(S.f, path, el.value); mudou(path); }
+      };
     } else {
       el.value = val ?? '';
       el.disabled = lock;
@@ -639,7 +655,38 @@ function mudou(path) {
 }
 
 // helpers de formulário
-const inp = (path, label, o = {}) => `<label class="f ${o.cls || ''}">${label}<input type="${o.type || 'text'}" data-f="${path}" ${o.im ? `inputmode="${o.im}"` : ''} ${o.ph ? `placeholder="${esc(o.ph)}"` : ''} ${o.list ? `list="${o.list}"` : ''} autocomplete="off"></label>`;
+const inp = (path, label, o = {}) => {
+  if (o.type === 'date' || o.type === 'time') return `<label class="f ${o.cls || ''}">${label}<input data-f="${path}" ${attrMascara(o.type === 'date' ? 'data' : 'hora')}></label>`;
+  return `<label class="f ${o.cls || ''}">${label}<input type="${o.type || 'text'}" data-f="${path}" ${o.im ? `inputmode="${o.im}"` : ''} ${o.ph ? `placeholder="${esc(o.ph)}"` : ''} ${o.list ? `list="${o.list}"` : ''} autocomplete="off"></label>`;
+};
+
+// ----- data e hora digitadas (máscara + teclado numérico). Gravação continua aaaa-mm-dd e hh:mm.
+const RE_HORA = '([01][0-9]|2[0-3]):[0-5][0-9]';
+const RE_DATA = '(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/[0-9]{4}';
+const attrMascara = (tipo) => (tipo === 'data'
+  ? `type="text" data-mask="data" inputmode="numeric" placeholder="dd/mm/aaaa" maxlength="10" pattern="${RE_DATA}" autocomplete="off"`
+  : `type="text" data-mask="hora" inputmode="numeric" placeholder="hh:mm" maxlength="5" pattern="${RE_HORA}" autocomplete="off"`);
+function aplicarMascara(tipo, v) {
+  const d = String(v).replace(/\D/g, '');
+  if (tipo === 'hora') return d.length > 2 ? `${d.slice(0, 2)}:${d.slice(2, 4)}` : d;
+  return [d.slice(0, 2), d.slice(2, 4), d.slice(4, 8)].filter(Boolean).join('/');
+}
+const isoParaBR = (iso) => (/^\d{4}-\d{2}-\d{2}$/.test(iso || '') ? iso.split('-').reverse().join('/') : '');
+function brParaISO(br) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(br || '');
+  if (!m) return null;
+  const [, d, mm, a] = m.map(Number);
+  const dt = new Date(a, mm - 1, d);
+  return dt.getFullYear() === a && dt.getMonth() === mm - 1 && dt.getDate() === d && a >= 1900 ? `${m[3]}-${m[2]}-${m[1]}` : null;
+}
+const horaValida = (h) => new RegExp(`^${RE_HORA}$`).test(h || '');
+// formata enquanto digita (em qualquer tela ou diálogo)
+document.addEventListener('input', (e) => {
+  const el = e.target;
+  if (!el?.dataset?.mask) return;
+  const antes = el.value, novo = aplicarMascara(el.dataset.mask, antes);
+  if (novo !== antes) { el.value = novo; try { el.setSelectionRange(novo.length, novo.length); } catch { /* sem cursor */ } }
+}, true);
 const naoSeAplica = (path) => `<label class="chk na"><input type="checkbox" data-f="${path}">Não se aplica</label>`;
 const chk = (path, label) => `<label class="chk"><input type="checkbox" data-f="${path}">${label}</label>`;
 const chips = (path, opts) => `<div class="chips" data-f="${path}">${opts.map((o) => { const [v, l] = Array.isArray(o) ? o : [o, o]; return `<button data-v="${esc(v)}">${esc(l)}</button>`; }).join('')}</div>`;
@@ -1156,9 +1203,9 @@ async function dlgEditarInfusao(inf) {
   const r = await modal({
     title: `Editar ${esc(inf.nome)}`,
     body: `<p class="small muted">${esc(inf.tci ? 'TCI — alvo em ' + inf.tci : inf.unid)}</p>
-      ${inf.etapas.map((e, i) => `<div class="grid"><label class="f">${i ? 'Mudança ' + i : 'Início'}<input type="time" name="h${i}" value="${hhmm(e.t)}" required></label>
+      ${inf.etapas.map((e, i) => `<div class="grid"><label class="f">${i ? 'Mudança ' + i : 'Início'}<input name="h${i}" value="${hhmm(e.t)}" required ${attrMascara('hora')}></label>
         <label class="f">${inf.tci ? 'Alvo' : 'Dose'}<input type="text" inputmode="decimal" name="v${i}" value="${esc(num(e.valor))}" required></label></div>`).join('')}
-      <div class="grid"><label class="f">Fim (vazio = em curso)<input type="time" name="fim" value="${inf.fim ? hhmm(inf.fim) : ''}"></label>
+      <div class="grid"><label class="f">Fim (vazio = em curso)<input name="fim" value="${inf.fim ? hhmm(inf.fim) : ''}" ${attrMascara('hora')}></label>
       ${inf.tci || inf.totalManual ? `<label class="f">Total (bomba)<input type="text" inputmode="decimal" name="total" value="${esc(num(inf.totalManual))}"></label>
         <label class="f">Unidade<select name="tunid">${['mg', 'mcg', 'mL'].map((u) => `<option ${u === inf.totalUnid ? 'selected' : ''}>${u}</option>`).join('')}</select></label>` : ''}</div>`,
   });
@@ -1222,7 +1269,7 @@ async function marcarTempo(k) {
   } else {
     const r = await modal({
       title: l,
-      body: `<label class="f">Horário<input type="time" name="hora" value="${hhmm(S.f.tempos[k])}" required></label>`,
+      body: `<label class="f">Horário<input name="hora" value="${hhmm(S.f.tempos[k])}" required ${attrMascara('hora')}></label>`,
       extra: [{ label: 'Limpar', value: 'clear', cls: 'bad' }],
     });
     if (r.v === 'clear') S.f.tempos[k] = null;
@@ -1244,7 +1291,7 @@ async function marcarTempo(k) {
   telaFicha();
 }
 
-const campoHora = (t) => /* t: ISO opcional */ `<label class="f">Horário<input type="time" name="hora" value="${t ? hhmm(t) : agoraHM()}" required></label>`;
+const campoHora = (t) => /* t: ISO opcional */ `<label class="f">Horário<input name="hora" value="${t ? hhmm(t) : agoraHM()}" required ${attrMascara('hora')}></label>`;
 
 function salvarItem(colecao, item, dados) {
   const lista = S.f[colecao];
@@ -1431,7 +1478,7 @@ async function dlgEventos() {
         const i = n++;
         lista.insertAdjacentHTML('beforeend', `<div class="evlin" data-i="${i}" style="display:grid;grid-template-columns:1fr 7.5em auto;gap:8px;align-items:end;margin-bottom:8px">
           <label class="f">Evento<input type="text" name="t_${i}" value="${esc(texto)}" required autocomplete="off"></label>
-          <label class="f">Horário<input type="time" name="h_${i}" value="${agoraHM()}" required></label>
+          <label class="f">Horário<input name="h_${i}" value="${agoraHM()}" required ${attrMascara('hora')}></label>
           <button type="button" class="btn" data-rem="${i}" aria-label="Tirar">✕</button></div>`);
         const lin = $(`.evlin[data-i="${i}"]`, lista);
         lin.chip = chip;

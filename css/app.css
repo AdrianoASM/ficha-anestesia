@@ -245,3 +245,6 @@ details.sis > summary + * { margin-top: 10px; }
 .inf-bts { display: flex; flex-direction: column; gap: 6px; }
 .inf-bts .btn { min-height: 38px; padding: 0 12px; }
 @media (min-width: 700px) { .acoes { grid-template-columns: repeat(5, 1fr); } }
+
+/* data/hora digitada fora do formato */
+input.invalido, input[data-mask]:not(:placeholder-shown):invalid { border-color: var(--bad); background: var(--bad-soft); }
